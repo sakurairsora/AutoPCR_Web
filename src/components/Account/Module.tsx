@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { Box, Button, Card, Flex, HStack, Heading, Separator, Stack, Tag, useDisclosure } from '@chakra-ui/react'
+import { Box, Button, Card, Collapsible, Flex, HStack, Heading, Separator, Stack, Tag, useDisclosure } from '@chakra-ui/react'
 import { ConfigValue, ModuleInfo } from '@interfaces/Module';
 import { FiChevronDown, FiCopy } from 'react-icons/fi';
 import { getAccountAreaSingleResultList, postAccountAreaSingle, putAccountConfig, getAccountConfig, putAccountConfigs } from '@api/Account';
@@ -185,30 +185,32 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                 </Flex>
             </Card.Header>
 
-            {isExpanded && (
-                <Card.Body pt={0} animation="fade-in 0.2s">
-                    <Stack gap='4'>
-                        {info?.description &&
-                            <Box bg="bg.subtle" p={3} borderRadius="lg" fontSize="sm" color="fg.muted">
-                                {info?.description}
-                            </Box>
-                        }
-                        {info?.description && info?.config_order.length != 0 && <Separator borderColor="border.subtle" />}
-                        {info?.config_order.length != 0 &&
-                            <Box>
-                                <Stack gap='4'>
-                                    <Heading size='sm' color="fg.subtle">设置项</Heading>
-                                    {
-                                        info?.config_order.map((key) => (
-                                            <Config key={key} alias={alias} value={config[key]} info={info.config[key]} />
-                                        ))
-                                    }
-                                </Stack>
-                            </Box>
-                        }
-                    </Stack>
+<Collapsible.Root open={isExpanded}>
+    <Collapsible.Content>
+        <Card.Body pt={0} animation="fade-in 0.2s">
+            <Stack gap='4'>
+                {info?.description &&
+                    <Box bg="bg.subtle" p={3} borderRadius="lg" fontSize="sm" color="fg.muted">
+                        {info?.description}
+                    </Box>
+                }
+                {info?.description && info?.config_order.length != 0 && <Separator borderColor="border.subtle" />}
+                {info?.config_order.length != 0 &&
+                    <Box>
+                        <Stack gap='4'>
+                            <Heading size='sm' color="fg.subtle">设置项</Heading>
+                            {
+                                info?.config_order.map((key) => (
+                                    <Config key={key} alias={alias} value={config[key]} info={info.config[key]} />
+                                ))
+                            }
+                        </Stack>
+                    </Box>
+                }
+            </Stack>
                 </Card.Body>
-            )}
+    </Collapsible.Content>
+</Collapsible.Root>
             {isDangerous && (
                 <Alert
                     isOpen={dangerConfirm.open}
