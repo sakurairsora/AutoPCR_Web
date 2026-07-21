@@ -195,8 +195,6 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                             
                             {/* 收藏黄星 */}
                             <Box
-                                as="button"
-                                type="button"
                                 onClick={handleToggleFav}
                                 cursor="pointer"
                                 color={config?.[`_fav_${info.key}`] ? "yellow.400" : "gray.400"}
@@ -204,8 +202,6 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                                 lineHeight={1}
                                 display="flex"
                                 alignItems="center"
-                                bg="transparent"
-                                border="none"
                                 p={0}
                             >
                                 <FiStar fill={config?.[`_fav_${info.key}`] ? "currentColor" : "none"} />
