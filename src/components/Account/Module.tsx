@@ -179,7 +179,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
         >
             <Card.Header py={3} cursor="pointer" onClick={onToggleExpand}>
                 <Flex align="center" wrap="wrap" gap={2}>
-                    <Box onClick={(e) => e.stopPropagation()} mr={{ base: 1, md: 3 }}>
+                    <Box onClick={(e) => e.stopPropagation()} mr={{ base: 1, md: 1 }}>
                          {/* 受控组件绑定，保证导入/更新后界面同步勾选 */}
                          <Checkbox 
                             checked={!!config[info.key]} 
