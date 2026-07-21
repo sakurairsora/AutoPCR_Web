@@ -67,7 +67,7 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
         switch (type) {
             case 'bool':
             case 'single':
-                if (typeof value === "boolean") return value;
+                if (typeof value === "string" || typeof value === "number") return value;
                 break
             case 'int':
                 if (typeof value === "number") return value;
