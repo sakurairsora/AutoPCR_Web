@@ -7,12 +7,13 @@ import { ConfigValue, ModuleResponse } from '@interfaces/Module';
 import { Skeleton } from '../../components/ui/skeleton';
 import Toc from "./Toc"
 import { getAccountConfig } from '@api/Account'
+import { keyframes } from '@emotion/react'
 
 interface AreaProps {
     alias: string,
     keys: string,
     areaName: string,
-    showOnlyFav?: boolean // 优化：设为可选属性
+    showOnlyFav?: boolean
 }
 
 export interface TocItem {
@@ -20,7 +21,13 @@ export interface TocItem {
     id: string
 }
 
-export default function Area({ alias, keys: key, areaName, showOnlyFav = false }: AreaProps) { // 优化：赋默认值 false
+// 首次加载的轻量入场动画
+const fadeInUp = keyframes`
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+`
+
+export default function Area({ alias, keys: key, areaName, showOnlyFav = false }: AreaProps) {
 
     const [config, setConfig] = useState<ModuleResponse | null>(null);
     const [isFetching, setIsFetching] = useState(false);
@@ -91,51 +98,55 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
     const isInitialLoading = !config && isFetching;
 
     return (
-        <Box
-            opacity={isFetching && config ? 0.35 : 1}
-            transform={isFetching && config ? "translateY(5px)" : "translateY(0)"}
-            transition="opacity 0.15s ease-out, transform 0.15s ease-out"
-            pointerEvents={isFetching ? 'none' : 'auto'}
-            pb={20}
-        >
-            <Stack gap={4}>
-                {isInitialLoading ? (
-                    Array.from({ length: 4 }).map((_, i) => (
-                        <Box key={i} p={6} borderWidth="1px" borderRadius="2xl" bg="bg.panel" shadow="sm">
-                            <Skeleton height="30px" width="40%" mb={4} />
-                            <Skeleton height="20px" width="100%" mb={2} />
-                            <Skeleton height="20px" width="80%" mb={2} />
-                            <Skeleton height="20px" width="90%" mb={6} />
-                            <Skeleton height="40px" width="100%" />
-                        </Box>
-                    ))
-                ) : (
-                    visibleModules.map((module) => {
-                        const moduleInfo = config?.info?.[module];
-                        // 优化：做判空类型收窄，解决 TS2322 报错
-                        if (!moduleInfo) return null;
+        <>
+            {/* 1. 内容模块区域：仅对内容做透明度过渡与入场动画 */}
+            <Box
+                animation={config && !isFetching ? `${fadeInUp} 0.25s ease-out` : undefined}
+                opacity={isFetching && config ? 0.35 : 1}
+                transition="opacity 0.15s ease-out"
+                pointerEvents={isFetching ? 'none' : 'auto'}
+                pb={20}
+            >
+                <Stack gap={4}>
+                    {isInitialLoading ? (
+                        Array.from({ length: 4 }).map((_, i) => (
+                            <Box key={i} p={6} borderWidth="1px" borderRadius="2xl" bg="bg.panel" shadow="sm">
+                                <Skeleton height="30px" width="40%" mb={4} />
+                                <Skeleton height="20px" width="100%" mb={2} />
+                                <Skeleton height="20px" width="80%" mb={2} />
+                                <Skeleton height="20px" width="90%" mb={6} />
+                                <Skeleton height="40px" width="100%" />
+                            </Box>
+                        ))
+                    ) : (
+                        visibleModules.map((module) => {
+                            const moduleInfo = config?.info?.[module];
+                            if (!moduleInfo) return null;
 
-                        return (
-                            <Module 
-                                key={module} 
-                                id={module} 
-                                alias={alias} 
-                                areaKey={key} 
-                                areaName={areaName} 
-                                config={config?.config ?? {}} 
-                                info={moduleInfo} 
-                                isOpen={open} 
-                                onOpen={onOpen} 
-                                onClose={onClose} 
-                                onConfigUpdate={handleConfigUpdate} 
-                            />
-                        );
-                    })
-                )}
-            </Stack>
+                            return (
+                                <Module 
+                                    key={module} 
+                                    id={module} 
+                                    alias={alias} 
+                                    areaKey={key} 
+                                    areaName={areaName} 
+                                    config={config?.config ?? {}} 
+                                    info={moduleInfo} 
+                                    isOpen={open} 
+                                    onOpen={onOpen} 
+                                    onClose={onClose} 
+                                    onConfigUpdate={handleConfigUpdate} 
+                                />
+                            );
+                        })
+                    )}
+                </Stack>
+            </Box>
 
-            <Flex position="fixed"
-                right="6"
+            {/* 2. 悬浮 TOC 导航球：移至最外层 Fragment，实现真·Viewport 屏幕中央固定，零闪跳且适应各种 DPI/分辨率 */}
+            <Flex 
+                position="fixed"
+                right={{ base: "3", md: "6" }} // 适配小屏幕/高 DPI 缩放，防止挤压卡片内容
                 top="50%"
                 transform="translateY(-50%)"
                 justifyContent="center"
@@ -147,7 +158,7 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
                         <IconButton 
                             aria-label='TOC'
                             colorPalette="blue"
-                            size="xl"
+                            size={{ base: "lg", md: "xl" }} // 响应式尺寸
                             rounded="full"
                             shadow="xl"
                             transition="all 0.2s"
@@ -161,6 +172,6 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
                     </Popover.Content>
                 </Popover.Root>
             </Flex>
-        </Box>
+        </>
     )
 }
