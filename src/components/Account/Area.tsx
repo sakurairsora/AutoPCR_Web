@@ -12,7 +12,7 @@ interface AreaProps {
     alias: string,
     keys: string,
     areaName: string,
-    showOnlyFav: boolean
+    showOnlyFav?: boolean // 优化：设为可选属性
 }
 
 export interface TocItem {
@@ -20,16 +20,14 @@ export interface TocItem {
     id: string
 }
 
-export default function Area({ alias, keys: key, areaName, showOnlyFav }: AreaProps) {
+export default function Area({ alias, keys: key, areaName, showOnlyFav = false }: AreaProps) { // 优化：赋默认值 false
 
     const [config, setConfig] = useState<ModuleResponse | null>(null);
-    // 1. 增加 isFetching 状态，专门用来做切 Tab 的无感过渡
     const [isFetching, setIsFetching] = useState(false);
     const { open, onOpen, onClose } = useDisclosure();
 
     useEffect(() => {
         let isMounted = true;
-        // 开启加载锁：旧内容立刻开始变暗
         setIsFetching(true);
 
         if (alias && key) {
@@ -54,13 +52,11 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav }: AreaPr
                     }
                 }
                 
-                // 直接覆盖旧 config，不经过 null 状态
                 setConfig(finalRes);
             }).catch((err) => {
                 if (isMounted) console.log(err);
             }).finally(() => {
                 if (isMounted) {
-                    // 解锁：恢复亮度
                     setIsFetching(false);
                 }
             });
@@ -81,7 +77,6 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav }: AreaPr
         });
     };
 
-    // 根据 showOnlyFav 过滤模块列表
     const visibleModules = showOnlyFav
         ? config?.order.filter(moduleKey => config.config[`_fav_${moduleKey}`] === true) ?? []
         : config?.order ?? [];
@@ -93,18 +88,14 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav }: AreaPr
             id: moduleKey
         }));
 
-    // 只有第一次进页面、手头上彻底没有任何数据时，才展示骨架屏
     const isInitialLoading = !config && isFetching;
 
     return (
         <Box
-            // 核心动画细节：
-            // 1. 切换时 0.15s 迅速变暗（35% opacity）+ 轻微下沉 4px，给用户明确的"正在换页"反馈
-            // 2. 数据到位后 0.15s 瞬间变亮并复位，全程旧组件垫底，无任何空白/闪烁
             opacity={isFetching && config ? 0.35 : 1}
-            transform={isFetching && config ? "translateY(15px)" : "translateY(0)"}
+            transform={isFetching && config ? "translateY(5px)" : "translateY(0)"}
             transition="opacity 0.15s ease-out, transform 0.15s ease-out"
-            pointerEvents={isFetching ? 'none' : 'auto'} // 变暗期间禁止误触
+            pointerEvents={isFetching ? 'none' : 'auto'}
             pb={20}
         >
             <Stack gap={4}>
@@ -119,21 +110,27 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav }: AreaPr
                         </Box>
                     ))
                 ) : (
-                    visibleModules.map((module) => (
-                        <Module 
-                            key={module} 
-                            id={module} 
-                            alias={alias} 
-                            areaKey={key} 
-                            areaName={areaName} 
-                            config={config?.config ?? {}} 
-                            info={(config?.info[module])} 
-                            isOpen={open} 
-                            onOpen={onOpen} 
-                            onClose={onClose} 
-                            onConfigUpdate={handleConfigUpdate} 
-                        />
-                    ))
+                    visibleModules.map((module) => {
+                        const moduleInfo = config?.info?.[module];
+                        // 优化：做判空类型收窄，解决 TS2322 报错
+                        if (!moduleInfo) return null;
+
+                        return (
+                            <Module 
+                                key={module} 
+                                id={module} 
+                                alias={alias} 
+                                areaKey={key} 
+                                areaName={areaName} 
+                                config={config?.config ?? {}} 
+                                info={moduleInfo} 
+                                isOpen={open} 
+                                onOpen={onOpen} 
+                                onClose={onClose} 
+                                onConfigUpdate={handleConfigUpdate} 
+                            />
+                        );
+                    })
                 )}
             </Stack>
 
