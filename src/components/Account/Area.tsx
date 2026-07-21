@@ -21,9 +21,9 @@ export interface TocItem {
     id: string
 }
 
-// 首次加载的轻量入场动画
+// 仅用于整页首次进入时的轻微入场动画
 const fadeInUp = keyframes`
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 `
 
@@ -31,6 +31,8 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
 
     const [config, setConfig] = useState<ModuleResponse | null>(null);
     const [isFetching, setIsFetching] = useState(false);
+    // 关键锁：记录是否是真正的“首次加载”
+    const [isFirstLoad, setIsFirstLoad] = useState(true);
     const { open, onOpen, onClose } = useDisclosure();
 
     useEffect(() => {
@@ -65,6 +67,8 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
             }).finally(() => {
                 if (isMounted) {
                     setIsFetching(false);
+                    // 首次加载成功后锁死，后续 Tab 切换再也不会触发 keyframe 动画
+                    setIsFirstLoad(false);
                 }
             });
         }
@@ -99,10 +103,13 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
 
     return (
         <>
-            {/* 1. 内容模块区域：仅对内容做透明度过渡与入场动画 */}
+            {/* 1. 模块列表区域：
+                   - 首次加载完毕：跑 1 次 fadeInUp；
+                   - 后续切换 Tab：animation 为 undefined，仅通过 opacity 纯平滑过渡，无任何弹跳闪烁 
+            */}
             <Box
-                animation={config && !isFetching ? `${fadeInUp} 0.25s ease-out` : undefined}
-                opacity={isFetching && config ? 0.35 : 1}
+                animation={isFirstLoad && config ? `${fadeInUp} 0.25s ease-out` : undefined}
+                opacity={isFetching && config ? 0.4 : 1}
                 transition="opacity 0.15s ease-out"
                 pointerEvents={isFetching ? 'none' : 'auto'}
                 pb={20}
@@ -143,10 +150,10 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
                 </Stack>
             </Box>
 
-            {/* 2. 悬浮 TOC 导航球：移至最外层 Fragment，实现真·Viewport 屏幕中央固定，零闪跳且适应各种 DPI/分辨率 */}
+            {/* 2. 悬浮 TOC 导航球：在最外层，位置绝对锁定屏幕右侧中央，适配各种 DPI/分辨率，切 Tab 零闪跳零位移 */}
             <Flex 
                 position="fixed"
-                right={{ base: "3", md: "6" }} // 适配小屏幕/高 DPI 缩放，防止挤压卡片内容
+                right={{ base: "3", md: "6" }}
                 top="50%"
                 transform="translateY(-50%)"
                 justifyContent="center"
@@ -158,7 +165,7 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
                         <IconButton 
                             aria-label='TOC'
                             colorPalette="blue"
-                            size={{ base: "lg", md: "xl" }} // 响应式尺寸
+                            size={{ base: "lg", md: "xl" }}
                             rounded="full"
                             shadow="xl"
                             transition="all 0.2s"
