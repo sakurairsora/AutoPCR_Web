@@ -53,6 +53,18 @@ function AccountComponent() {
         }));
     };
 
+    const activeAreaIndex = Number(activeTab) - 1;
+    const currentArea = activeTab !== "0" && accountInfo?.area ? accountInfo.area[activeAreaIndex] : null;
+    const isCurrentTabFavOnly = currentArea ? !!favOnlyMap[currentArea.key] : false;
+
+    const handleToggleCurrentFavOnly = () => {
+        if (!currentArea?.key) return;
+        setFavOnlyMap(prev => ({
+            ...prev,
+            [currentArea.key]: !prev[currentArea.key]
+        }));
+    };
+
     return (
         <Tabs.Root 
             lazyMount 

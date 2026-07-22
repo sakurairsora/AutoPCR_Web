@@ -92,7 +92,7 @@ function ConfigInt({ alias, value, info }: ConfigProps) {
 
     // 受控的字符串显示值
     const [numStr, setNumStr] = useState(String(value));
-    const [saving, setSaving] = useState(false); // 可选 loading 态
+    //const [saving, setSaving] = useState(false); // 可选 loading 态
     const mountedRef = useRef(true);
 
     // 外部 value 同步
