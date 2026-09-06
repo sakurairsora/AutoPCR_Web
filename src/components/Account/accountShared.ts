@@ -52,6 +52,32 @@ export function saveNotifyPrefs(prefs: NotifyPrefs): void {
     }
 }
 
+/** 同类警报的已通知记录：一个月内同类只弹一次（跨账号共用），活动h本例外 */
+const NOTIFY_SENT_KEY = 'autopcr_notify_sent_v1';
+const NOTIFY_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function wasNotifiedRecently(classId: string): boolean {
+    try {
+        const raw = localStorage.getItem(NOTIFY_SENT_KEY);
+        const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+        const last = map[classId];
+        return typeof last === 'number' && Date.now() - last < NOTIFY_MONTH_MS;
+    } catch {
+        return false;
+    }
+}
+
+export function markNotifiedForClass(classId: string): void {
+    try {
+        const raw = localStorage.getItem(NOTIFY_SENT_KEY);
+        const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+        map[classId] = Date.now();
+        localStorage.setItem(NOTIFY_SENT_KEY, JSON.stringify(map));
+    } catch {
+        // 本地存储不可用则不去重
+    }
+}
+
 /** 账号日常执行完成事件（仅开启周期通知时派发），载荷=账号名 */
 export function emitDailyFinished(alias: string): void {
     try {
@@ -81,7 +107,6 @@ export function hasNotifiedThisSession(): boolean {
 export function markNotifiedThisSession(): void {
     sessionStorage.setItem('autopcr_notified_once', '1');
 }
-
 /** 文字越多两侧越窄；3 个字以内保持默认内边距（图标/短按钮保持好点） */
 export function textFitPadding(label: string): string | undefined {
     const len = Array.from(label).length;

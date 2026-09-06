@@ -43,7 +43,7 @@ import { AccountInfo } from './AccountCard';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, hasNotifiedThisSession, markNotifiedThisSession, onDailyFinished } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, wasNotifiedRecently, markNotifiedForClass, onDailyFinished } from './accountShared';
 import type { NotifyPrefs } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
@@ -123,7 +123,6 @@ export function DashBoard() {
     useEffect(() => {
         if (!notifyPrefs.enabled) return;
         const off = onDailyFinished(async (alias: string) => {
-            if (hasNotifiedThisSession()) return;
             try {
                 const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${alias}/daily_result?text=true`);
                 const modules = res?.data?.result ?? {};
@@ -133,11 +132,13 @@ export function DashBoard() {
                     return;
                 }
                 if (alarmSeenRef.current) return; // 之前已是警报：静默
-                // 模块 key 与中文名一起参与静音匹配（包含即命中）
+                // 模块 key 与中文名一起参与静音匹配（包含即命中）；活动h本扫荡永不去重
                 const hay = `${alarm[0]} ${alarm[1]?.name ?? ''}`;
-                if (notifyPrefs.muted.some((label) => hay.includes(label))) return;
+                const isHurdle = hay.includes('活动h') || hay.includes('扫荡活动');
+                if (notifyPrefs.muted.some((label) => hay.includes(label)) && !isHurdle) return;
+                if (!isHurdle && wasNotifiedRecently(alarm[0])) return; // 同类一月内已弹过（跨账号共用）
                 alarmSeenRef.current = true;
-                markNotifiedThisSession();
+                if (!isHurdle) markNotifiedForClass(alarm[0]);
                 const accName = getDisplayName(alias);
                 const body = `${accName}：${alarm[1]?.name || alarm[0]} 状态「${alarm[1]?.status}」`;
                 try {
@@ -609,7 +610,7 @@ export function DashBoard() {
                                 gap={1}
                                 flexShrink={0}
                                 cursor="pointer"
-                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。多个号通知只出现一次。"
+                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。同类警报一个月内只弹一次（活动h本扫荡除外），多个号报也只弹一次。"
                             >
                                 <Checkbox
                                     checked={notifyPrefs.enabled}
