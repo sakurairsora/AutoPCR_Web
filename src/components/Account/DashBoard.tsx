@@ -117,7 +117,7 @@ export function DashBoard() {
     }, [notifyPrefs]);
 
     // 周期通知：被动监听「某账号日常执行完成」事件 → 若此前无警报，才去筛查该账号的分模块结果；
-    // 出现警报（错误/中止）且未被静音 → 弹一次系统通知（整个会话只弹一次，需先授权）。
+    // 出现警报（错误/中止）且未被静音/未被去重 → 弹一次系统通知（同类警报一个月内只弹一次，活动h本扫荡例外）。
     // 已是警报状态则静默，直到状态恢复正常后再次出警才会再弹。
     const alarmSeenRef = useRef(false);
     useEffect(() => {
@@ -126,21 +126,27 @@ export function DashBoard() {
             try {
                 const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${alias}/daily_result?text=true`);
                 const modules = res?.data?.result ?? {};
-                const alarm = Object.entries(modules).find(([, m]) => m?.status === '错误' || m?.status === '中止');
-                if (!alarm) {
+                const alarms = Object.entries(modules).filter(([, m]) => m?.status === '错误' || m?.status === '中止');
+                if (alarms.length === 0) {
                     if (alarmSeenRef.current) alarmSeenRef.current = false; // 状态恢复正常，重新武装
                     return;
                 }
                 if (alarmSeenRef.current) return; // 之前已是警报：静默
-                // 模块 key 与中文名一起参与静音匹配（包含即命中）；活动h本扫荡永不去重
-                const hay = `${alarm[0]} ${alarm[1]?.name ?? ''}`;
-                const isHurdle = hay.includes('活动h') || hay.includes('扫荡活动');
-                if (notifyPrefs.muted.some((label) => hay.includes(label)) && !isHurdle) return;
-                if (!isHurdle && wasNotifiedRecently(alarm[0])) return; // 同类一月内已弹过（跨账号共用）
-                alarmSeenRef.current = true;
-                if (!isHurdle) markNotifiedForClass(alarm[0]);
+                // 逐个筛查警报模块：跳过被静音或月内已弹过的，找到第一个值得弹的（活动h本扫荡永不去重不静音）
+                const target = alarms.find(([key, m]) => {
+                    const hay = `${key} ${m?.name ?? ''}`;
+                    if (hay.includes('活动h') || hay.includes('扫荡活动')) return true;
+                    if (notifyPrefs.muted.some((label) => hay.includes(label))) return false;
+                    return !wasNotifiedRecently(key); // 同类一月内已弹过（跨账号共用）则跳过
+                });
+                alarmSeenRef.current = true; // 处于警报态：恢复前保持静默
+                if (!target) return; // 全部被抑制：不弹
+                const tHay = `${target[0]} ${target[1]?.name ?? ''}`;
+                if (!tHay.includes('活动h') && !tHay.includes('扫荡活动')) {
+                    markNotifiedForClass(target[0]);
+                }
                 const accName = getDisplayName(alias);
-                const body = `${accName}：${alarm[1]?.name || alarm[0]} 状态「${alarm[1]?.status}」`;
+                const body = `${accName}：${target[1]?.name || target[0]} 状态「${target[1]?.status}」`;
                 try {
                     if (Notification.permission === 'granted') {
                         new Notification('AutoPCR 日常警报', { body });
