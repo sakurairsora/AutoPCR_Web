@@ -25,3 +25,6 @@ dist-ssr
 stats.html
 .vite-dev*.log
 .pnpm-store/
+
+# 本地审计导出
+audit/
