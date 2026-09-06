@@ -23,7 +23,7 @@ export function loadPopupMaster(): boolean {
     return localStorage.getItem(POPUP_MASTER_KEY) !== 'false';
 }
 
-/** 周期通知：开关 + 静音名单（模块中文名），存本地 */
+/** 周期通知：开关 + 静音名单（模块 key），存本地 */
 export interface NotifyPrefs {
     enabled: boolean;
     muted: string[];
@@ -78,7 +78,7 @@ export function markNotifiedForClass(classId: string): void {
     }
 }
 
-/** 账号日常执行完成事件（仅开启周期通知时派发），载荷=账号名 */
+/** 账号日常执行完成事件（无条件派发，监听端按通知开关过滤），载荷=账号名 */
 export function emitDailyFinished(alias: string): void {
     try {
         window.dispatchEvent(new CustomEvent('autopcr_daily_finished', { detail: alias }));
@@ -99,14 +99,6 @@ export function onDailyFinished(cb: (alias: string) => void): () => void {
     };
 }
 
-/** 本次浏览器会话是否已弹过周期通知（多个号只弹一次） */
-export function hasNotifiedThisSession(): boolean {
-    return sessionStorage.getItem('autopcr_notified_once') === '1';
-}
-
-export function markNotifiedThisSession(): void {
-    sessionStorage.setItem('autopcr_notified_once', '1');
-}
 /** 文字越多两侧越窄；3 个字以内保持默认内边距（图标/短按钮保持好点） */
 export function textFitPadding(label: string): string | undefined {
     const len = Array.from(label).length;
@@ -139,3 +131,24 @@ export function saveBatch(accounts: string[]): void {
         // 本地存储不可用则仅本次会话有效
     }
 }
+
+/** localStorage 写入兜底：隐私模式等场景不抛异常打断调用方 */
+export function safeSetItem(key: string, value: string): void {
+    try {
+        localStorage.setItem(key, value);
+    } catch {
+        // 本地存储不可用则忽略
+    }
+}
+
+/** 周期通知的可静音对象：与日常分模块结果里的模块 key 对应（静音/去重均按 key 精确匹配，不依赖中文文案） */
+export const NOTIFY_CANDIDATES: { key: string; label: string }[] = [
+    { key: 'special_underground', label: '特别地下城' },
+    { key: 'abyss_frontier', label: '深渊讨伐战' },
+    { key: 'abyss_boss', label: '深渊boss战' },
+    { key: 'very_hard_hurdle', label: '扫荡活动h本' },
+    { key: 'luna_tower', label: '露娜塔回廊扫荡' },
+];
+
+/** 活动h本扫荡：不参与月度去重（复刻活动不定日期开放，多个活动并存会漏扫），静音仍然有效 */
+export const NOTIFY_NO_DEDUP_KEY = 'very_hard_hurdle';

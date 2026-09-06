@@ -30,6 +30,7 @@ import { toaster } from '../../components/ui/toaster'
 import {useEffect} from 'react'
 import {useUserRole} from "@api/Account.ts";
 import RunningStatus from '../Account/RunningStatus';
+import NotifyWatcher from '../Account/notifyWatcher';
 
 interface NavItemProps extends FlexProps {
     icon?: IconType
@@ -169,6 +170,7 @@ export default function Nav() {
             </Box>
 
             <Flex p={4} flex={1} overflow={'auto'} flexDirection={'column'} zIndex={1}>
+                <NotifyWatcher />
                 <Outlet />
             </Flex>
 

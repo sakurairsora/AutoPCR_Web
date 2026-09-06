@@ -17,7 +17,6 @@ import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, deleteAccount, getUserInfo, putUserInfo } from '@api/Account';
 import { delAccount, postAccount, postAccountAreaSingle, postAccountImport } from '@api/Account';
-import { API } from '@api/APIUtils';
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { ResultInfo } from '@interfaces/UserInfo';
@@ -43,7 +42,7 @@ import { AccountInfo } from './AccountCard';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, wasNotifiedRecently, markNotifiedForClass, onDailyFinished } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, textFitPadding, safeSetItem, NOTIFY_CANDIDATES } from './accountShared';
 import type { NotifyPrefs } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
@@ -57,14 +56,6 @@ function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, self
     return set;
 }
 
-/** 周期通知的可静音对象：与日常分模块结果里的模块 key 对应 */
-const NOTIFY_CANDIDATES: { key: string; label: string }[] = [
-    { key: 'special_underground', label: '特别地下城' },
-    { key: 'abyss_frontier', label: '深渊讨伐战' },
-    { key: 'abyss_boss', label: '深渊boss战' },
-    { key: 'very_hard_hurdle', label: '扫荡活动h本' },
-    { key: 'luna_tower', label: '露娜塔回廊扫荡' },
-];
 
 export function DashBoard() {
     const [userInfo, setUserInfo] = useState<UserInfoResponse>();
@@ -109,62 +100,15 @@ export function DashBoard() {
     }, [batchAccounts]);
 
     useEffect(() => {
-        localStorage.setItem('autopcr_popupResult', popupResult ? 'true' : 'false');
+        safeSetItem('autopcr_popupResult', popupResult ? 'true' : 'false');
     }, [popupResult]);
 
     useEffect(() => {
         saveNotifyPrefs(notifyPrefs);
     }, [notifyPrefs]);
 
-    // 周期通知：被动监听「某账号日常执行完成」事件 → 若此前无警报，才去筛查该账号的分模块结果；
-    // 出现警报（错误/中止）且未被静音/未被去重 → 弹一次系统通知（同类警报一个月内只弹一次，活动h本扫荡例外）。
-    // 已是警报状态则静默，直到状态恢复正常后再次出警才会再弹。
-    const alarmSeenRef = useRef(false);
-    useEffect(() => {
-        if (!notifyPrefs.enabled) return;
-        const off = onDailyFinished(async (alias: string) => {
-            try {
-                const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${alias}/daily_result?text=true`);
-                const modules = res?.data?.result ?? {};
-                const alarms = Object.entries(modules).filter(([, m]) => m?.status === '错误' || m?.status === '中止');
-                if (alarms.length === 0) {
-                    if (alarmSeenRef.current) alarmSeenRef.current = false; // 状态恢复正常，重新武装
-                    return;
-                }
-                if (alarmSeenRef.current) return; // 之前已是警报：静默
-                // 逐个筛查警报模块：跳过被静音或月内已弹过的，找到第一个值得弹的（活动h本扫荡永不去重不静音）
-                const target = alarms.find(([key, m]) => {
-                    const hay = `${key} ${m?.name ?? ''}`;
-                    if (hay.includes('活动h') || hay.includes('扫荡活动')) return true;
-                    if (notifyPrefs.muted.some((label) => hay.includes(label))) return false;
-                    return !wasNotifiedRecently(key); // 同类一月内已弹过（跨账号共用）则跳过
-                });
-                alarmSeenRef.current = true; // 处于警报态：恢复前保持静默
-                if (!target) return; // 全部被抑制：不弹
-                const tHay = `${target[0]} ${target[1]?.name ?? ''}`;
-                if (!tHay.includes('活动h') && !tHay.includes('扫荡活动')) {
-                    markNotifiedForClass(target[0]);
-                }
-                const accName = getDisplayName(alias);
-                const body = `${accName}：${target[1]?.name || target[0]} 状态「${target[1]?.status}」`;
-                try {
-                    if (Notification.permission === 'granted') {
-                        new Notification('AutoPCR 日常警报', { body });
-                    } else {
-                        toaster.create({ type: 'warning', title: '日常警报（浏览器通知未授权）', description: body });
-                    }
-                } catch {
-                    toaster.create({ type: 'warning', title: '日常警报', description: body });
-                }
-            } catch {
-                // 拉取失败静默
-            }
-        });
-        return off;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [notifyPrefs.enabled, notifyPrefs.muted]);
 
-    // 批次名单随账号列表自动剔除失效项
+    // 批次名单随账号列表自动剔除失效项（依赖名单序列化：删一加一 length 不变也能触发）
     useEffect(() => {
         if (!userInfo) return;
         const names = new Set(userInfo.accounts?.map((acc) => acc.name) ?? []);
@@ -173,7 +117,7 @@ export function DashBoard() {
             return next.length === prev.length ? prev : next;
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [userInfo?.accounts?.length]);
+    }, [userInfo?.accounts?.map((a) => a.name).join('\u0001')]);
 
     useEffect(() => {
         if (sessionStorage.getItem('autopcr_need_refresh_dashboard') === '1') {
@@ -273,7 +217,7 @@ export function DashBoard() {
     const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === (userInfo?.accounts?.length ?? 0);
 
     const handleCleanDailyAll = () => {
-        const allNames = userInfo?.accounts?.map((acc) => acc.name) ?? [];
+        const allNames = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyRef.current.has(name));
         const busy = targets.filter((name) => busyRef.current.has(name));
@@ -292,7 +236,7 @@ export function DashBoard() {
 
     // 自定义功能按钮：目标=勾选的账号 > 自动批次（没勾选时） > 全体（批次也为空时）；忙碌账号跳过；危险功能先确认
     const handleQuickAction = async (btn: QuickActionItem) => {
-        const allNames = userInfo?.accounts?.map((acc) => acc.name) ?? [];
+        const allNames = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyRef.current.has(name));
         const busy = targets.filter((name) => busyRef.current.has(name));
@@ -363,10 +307,11 @@ export function DashBoard() {
         }
         NiceModal.show(QuickActionPicker, { alias: refAlias, current: quickActions }).then((items) => {
             if (!Array.isArray(items)) return;
-            const deadCount = quickActions.filter((q) => !items.some((i) => i.key === q.key)).length;
+            const knownKeys = new Set(items.map((i) => i.key));
+            const removedCount = quickActions.filter((q) => !knownKeys.has(q.key)).length;
             setQuickActions(items as QuickActionItem[]);
-            if (deadCount > 0) {
-                toaster.create({ type: 'info', title: `已移除 ${deadCount} 个失效的自定义按钮` });
+            if (removedCount > 0) {
+                toaster.create({ type: 'info', title: `已更新自定义按钮（移除 ${removedCount} 个）` });
             }
         });
     };
@@ -475,13 +420,6 @@ export function DashBoard() {
         return (selfAlias: string) => collectOccupiedNames(userInfo?.accounts, selfAlias);
     }, [userInfo?.accounts]);
 
-    // 文字越多两侧越窄；3 个字以内保持默认内边距（图标/短按钮保持好点）
-    const textFitPadding = (label: string): string | undefined => {
-        const len = Array.from(label).length;
-        if (len <= 3) return undefined;
-        if (len <= 5) return '0.5rem';
-        return '0.25rem';
-    };
 
     return (
         <Stack gap={4} minH="full" w="full" p={4} position="relative" zIndex={1}>
@@ -618,7 +556,7 @@ export function DashBoard() {
                                 cursor="pointer"
                                 color="orange.500"
                                 _hover={{ bg: 'orange.subtle' }}
-                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。同类警报一个月内只弹一次（活动h本扫荡除外），多个号报也只弹一次。"
+                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。同类警报一个月内只弹一次（活动h本扫荡不去重）。需停留在本站页面。"
                             >
                                 <Checkbox
                                     checked={notifyPrefs.enabled}
@@ -651,14 +589,14 @@ export function DashBoard() {
                                         {NOTIFY_CANDIDATES.map((c) => (
                                             <Checkbox
                                                 key={c.key}
-                                                checked={!notifyPrefs.muted.includes(c.label)}
+                                                checked={!notifyPrefs.muted.includes(c.key)}
                                                 onCheckedChange={(details) => {
                                                     const notifyOn = !!details.checked;
                                                     setNotifyPrefs((prev) => ({
                                                         ...prev,
                                                         muted: notifyOn
-                                                        ? prev.muted.filter((k) => k !== c.label)
-                                                        : [...prev.muted, c.label],
+                                                        ? prev.muted.filter((k) => k !== c.key)
+                                                        : [...prev.muted, c.key],
                                                     }));
                                                 }}
                                                 colorPalette="orange"
@@ -684,7 +622,7 @@ export function DashBoard() {
                                 colorPalette={isTableView ? "blue" : "gray"}
                                 onClick={() => {
                                     setIsTableView(true);
-                                    localStorage.setItem('accountViewMode', 'table');
+                                    safeSetItem('accountViewMode', 'table');
                                 }}
                             >
                                 <FiList />
@@ -698,7 +636,7 @@ export function DashBoard() {
                                 colorPalette={!isTableView ? "blue" : "gray"}
                                 onClick={() => {
                                     setIsTableView(false);
-                                    localStorage.setItem('accountViewMode', 'card');
+                                    safeSetItem('accountViewMode', 'card');
                                 }}
                             >
                                 <FiGrid />
@@ -915,4 +853,3 @@ export function DashBoard() {
         </Stack>
     );
 }
-

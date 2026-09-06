@@ -28,31 +28,41 @@ interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
 
 export default function Module({ alias, areaKey, areaName, config, info, isOpen, onOpen, onClose, onConfigUpdate, ...rest }: ModuleProps) {
 
-    /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚 */
+    /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚（仅还原仍等于乐观值的键，避免覆盖用户手改） */
+    const bulkBusyRef = useRef(false);
     const handleBulkSubStatus = async (value: number): Promise<void> => {
-        const keys = [
-            'ex_equip_rainbow_enchance_sub_status_1',
-            'ex_equip_rainbow_enchance_sub_status_2',
-            'ex_equip_rainbow_enchance_sub_status_3',
-            'ex_equip_rainbow_enchance_sub_status_4',
-        ];
-        const previous: Record<string, ConfigValue> = {};
-        const next: Record<string, ConfigValue> = {};
-        for (const k of keys) {
-            previous[k] = config[k];
-            next[k] = value;
-        }
-        for (const k of keys) onConfigUpdate?.(k, next[k]);
+        if (bulkBusyRef.current) return; // 防连点：上一批还在队列里
+        bulkBusyRef.current = true;
         try {
-            const res = await enqueueConfigSave(alias, () => putAccountConfigs(alias, next));
-            toaster.create({ type: 'success', title: '保存成功', description: res });
-        } catch (err) {
-            for (const k of keys) onConfigUpdate?.(k, previous[k]);
-            toaster.create({
-                type: 'error',
-                title: '保存失败',
-                description: await getErrorDescription(err as AxiosError),
-            });
+            const keys = [
+                'ex_equip_rainbow_enchance_sub_status_1',
+                'ex_equip_rainbow_enchance_sub_status_2',
+                'ex_equip_rainbow_enchance_sub_status_3',
+                'ex_equip_rainbow_enchance_sub_status_4',
+            ];
+            const optimistic: Record<string, ConfigValue> = {};
+            const next: Record<string, ConfigValue> = {};
+            for (const k of keys) {
+                optimistic[k] = config[k];
+                next[k] = value;
+            }
+            for (const k of keys) onConfigUpdate?.(k, next[k]);
+            try {
+                const res = await enqueueConfigSave(alias, () => putAccountConfigs(alias, next));
+                toaster.create({ type: 'success', title: '保存成功', description: res });
+            } catch (err) {
+                // 只还原当前值仍等于乐观写入值的键：排队期间用户手改过的键不动
+                for (const k of keys) {
+                    if (config[k] === next[k]) onConfigUpdate?.(k, optimistic[k]);
+                }
+                toaster.create({
+                    type: 'error',
+                    title: '保存失败',
+                    description: await getErrorDescription(err as AxiosError),
+                });
+            }
+        } finally {
+            bulkBusyRef.current = false;
         }
     };
     const { open: isExpanded, onToggle: onToggleExpand } = useDisclosure({ defaultOpen: false });

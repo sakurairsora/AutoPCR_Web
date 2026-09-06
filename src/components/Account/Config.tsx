@@ -200,7 +200,7 @@ function ConfigInt({ alias, value, info, onConfigUpdate }: ConfigProps) {
                 }
             })
             .catch(async (err: AxiosError) => {
-                onUpdateRef.current?.(info.key, previous as ConfigValue);
+                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
                 if (mountedRef.current) {
                     setNumStr(Number.isFinite(previousNum) ? String(previousNum) : String(min));
                     toaster.create({
@@ -489,10 +489,11 @@ function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
         const previous = (valueRef.current ?? '') as string;
         const newValue = e.target.value;
         if (newValue === previous) return; // 内容没变：不保存
-        if (!/^\d{2}:\d{2}$/.test(newValue)) {
+        const m = newValue.match(/^(\d{2}):(\d{2})$/);
+        if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) {
             // 格式不对：恢复原值并提示，不保存
             setTimeStr(previous);
-            toaster.create({ type: 'warning', title: '时间格式应为 HH:MM，未保存' });
+            toaster.create({ type: 'warning', title: '时间格式应为 HH:MM（0-23:0-59），未保存' });
             return;
         }
         setTimeStr(newValue);
@@ -504,7 +505,7 @@ function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
                 }
             })
             .catch(async (err: AxiosError) => {
-                onUpdateRef.current?.(info.key, previous as ConfigValue);
+                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
                 if (mountedRef.current) {
                     setTimeStr(previous);
                     toaster.create({
@@ -573,7 +574,7 @@ function ConfigText({ alias, value, info, onConfigUpdate }: ConfigProps) {
                 }
             })
             .catch(async (err: AxiosError) => {
-                onUpdateRef.current?.(info.key, previous as ConfigValue);
+                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
                 if (mountedRef.current) {
                     setTextStr(previous);
                     toaster.create({

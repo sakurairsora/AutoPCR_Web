@@ -108,11 +108,14 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
     };
 
     const handleConfirm = () => {
-        // 顺序=列表顺序（日常在前），稳定且可预期
+        if (groups.length === 0) return; // 拉取失败时不允许确认，避免误清空全部按钮
+        // 顺序=列表顺序（日常在前）；同 key 跨区服只保留首个，避免重复按钮
         const items: QuickActionItem[] = [];
+        const seen = new Set<string>();
         groups.forEach((g) =>
             g.modules.forEach((m) => {
-                if (selected.has(m.key)) {
+                if (selected.has(m.key) && !seen.has(m.key)) {
+                    seen.add(m.key);
                     items.push({ key: m.key, name: m.name, areaKey: g.areaKey, areaName: g.areaName, dangerous: m.dangerous });
                 }
             }),
@@ -194,7 +197,7 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                     </Text>
                 </ModalBody>
                 <ModalFooter>
-                    <Button colorPalette="blue" mr={3} onClick={handleConfirm} loading={isLoading}>
+                    <Button colorPalette="blue" mr={3} onClick={handleConfirm} loading={isLoading} disabled={groups.length === 0}>
                         确定
                     </Button>
                     <Button variant="ghost" onClick={handleClose}>

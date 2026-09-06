@@ -167,11 +167,8 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
                 throw new Error('文件中没有可用配置，未做任何修改。');
             }
 
-            // 保存收藏状态到 localStorage
-            localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
-            
+            // 全部成功后才写收藏，避免半导入状态（PUT 失败不覆盖现有收藏）
             await putAccountConfigs(alias, uploadConfig);
-            // 全部成功后才写收藏，避免半导入状态
             localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
             toaster.create({ type: 'success', title: '配置导入成功' });
             

@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -152,7 +152,7 @@ function AccountComponent() {
                         return NiceModal.show(ResultInfoModal, { alias: a, title: '日常', resultInfo: resList });
                     })
                     .catch(() => {
-                        return;
+                        toaster.create({ type: 'warning', title: '结果获取失败', description: '无法拉取本次日常结果' });
                     });
             }
         } catch (err: any) {
@@ -258,7 +258,7 @@ function AccountComponent() {
                             onCheckedChange={(details) => {
                                 const next = !!details.checked;
                                 setPopupOn(next);
-                                localStorage.setItem(POPUP_FLAG_KEY(account), next ? 'true' : 'false');
+                                safeSetItem(POPUP_FLAG_KEY(account), next ? 'true' : 'false');
                             }}
                             colorPalette="blue"
                             size="md"

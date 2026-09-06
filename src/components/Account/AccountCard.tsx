@@ -15,7 +15,7 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished } from './accountShared';
+import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem } from './accountShared';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
     account: AccountInfoInterface;
@@ -202,7 +202,7 @@ export function AccountInfo({
             setIsEditingName(false);
             return;
         }
-        localStorage.setItem(DISPLAY_NAME_KEY(alias), next);
+        safeSetItem(DISPLAY_NAME_KEY(alias), next);
         setDisplayName(next);
         setIsEditingName(false);
     };
@@ -389,7 +389,7 @@ export function AccountInfo({
             }
             await putAccountConfigs(alias, uploadConfig);
             // 全部成功后才写收藏，避免半导入状态
-            localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
+            safeSetItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
             toaster.create({ type: 'success', title: '配置导入成功' });
             onToggle();
         } catch (err) {
