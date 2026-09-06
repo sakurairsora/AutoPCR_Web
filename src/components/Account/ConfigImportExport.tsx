@@ -167,6 +167,9 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
                 throw new Error('文件中没有可用配置，未做任何修改。');
             }
 
+            // 保存收藏状态到 localStorage
+            localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
+            
             await putAccountConfigs(alias, uploadConfig);
             // 全部成功后才写收藏，避免半导入状态
             localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
