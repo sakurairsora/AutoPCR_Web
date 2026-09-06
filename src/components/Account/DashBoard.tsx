@@ -7,6 +7,7 @@ import {
     HStack,
     Input,
     Popover,
+    Portal,
     SimpleGrid,
     Stack,
     Table,
@@ -596,7 +597,7 @@ export function DashBoard() {
                             弹结果
                         </Checkbox>
                     </Box>
-                    <Box w="1px" h="1.25rem" bg="border.subtle" flexShrink={0} alignSelf="center" />
+                    <Box w="1px" h="1.25rem" bg="black" flexShrink={0} alignSelf="center" />
                     <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>
                         <Popover.Trigger asChild>
                             <Box
@@ -610,8 +611,13 @@ export function DashBoard() {
                                 gap={1}
                                 flexShrink={0}
                                 cursor="pointer"
+                                color="orange.500"
+                                _hover={{ bg: 'orange.subtle' }}
                                 title="让周期性任务，出警报（非跳过）时，弹出系统通知。同类警报一个月内只弹一次（活动h本扫荡除外），多个号报也只弹一次。"
                             >
+                                <Text color="orange.500" css={{ cursor: 'pointer', userSelect: 'none' }}>
+                                    周期通知
+                                </Text>
                                 <Checkbox
                                     checked={notifyPrefs.enabled}
                                     onCheckedChange={async (details) => {
@@ -628,38 +634,38 @@ export function DashBoard() {
                                     onClick={(e) => e.stopPropagation()}
                                     colorPalette="orange"
                                     size="md"
-                                >
-                                    周期通知
-                                </Checkbox>
+                                    aria-label="开启周期通知"
+                                />
                                 <FiPlus />
                             </Box>
                         </Popover.Trigger>
-                        <Popover.Content width="auto" minW="200px">
-                            <Popover.Body p={3}>
-                                <Stack gap={2}>
-                                    {NOTIFY_CANDIDATES.map((c) => (
-                                        <Checkbox
-                                            key={c.key}
-                                            defaultChecked={!notifyPrefs.muted.includes(c.label)}
-                                            checked={!notifyPrefs.muted.includes(c.label)}
-                                            onCheckedChange={(details) => {
-                                                const notifyOn = !!details.checked;
-                                                setNotifyPrefs((prev) => ({
-                                                    ...prev,
-                                                    muted: notifyOn
+                        <Portal>
+                            <Popover.Content width="auto" minW="200px" zIndex={1400}>
+                                <Popover.Body p={3}>
+                                    <Stack gap={2}>
+                                        {NOTIFY_CANDIDATES.map((c) => (
+                                            <Checkbox
+                                                key={c.key}
+                                                checked={!notifyPrefs.muted.includes(c.label)}
+                                                onCheckedChange={(details) => {
+                                                    const notifyOn = !!details.checked;
+                                                    setNotifyPrefs((prev) => ({
+                                                        ...prev,
+                                                        muted: notifyOn
                                                         ? prev.muted.filter((k) => k !== c.label)
                                                         : [...prev.muted, c.label],
-                                                }));
-                                            }}
-                                            colorPalette="orange"
-                                            size="md"
-                                        >
-                                            {c.label}
-                                        </Checkbox>
-                                    ))}
-                                </Stack>
-                            </Popover.Body>
-                        </Popover.Content>
+                                                    }));
+                                                }}
+                                                colorPalette="orange"
+                                                size="md"
+                                            >
+                                                {c.label}
+                                            </Checkbox>
+                                        ))}
+                                    </Stack>
+                                </Popover.Body>
+                            </Popover.Content>
+                        </Portal>
                     </Popover.Root>
                 </Flex>
 

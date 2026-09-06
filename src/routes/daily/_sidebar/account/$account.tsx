@@ -227,7 +227,7 @@ function AccountComponent() {
 
                 {activeTab !== '0' && (
                     <HStack alignItems="center" pr={2} gap={2}>
-                        <Box w="1px" h="1.25rem" bg="border.subtle" mx={1} alignSelf="center" />
+                        <Box w="1px" h="1.25rem" bg="black" mx={1} alignSelf="center" />
                         <Button
                             size="sm"
                             variant={isCurrentTabFavOnly ? 'solid' : 'ghost'}
