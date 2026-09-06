@@ -6,15 +6,12 @@ import {
     Flex,
     HStack,
     Input,
-    Popover,
-    SimpleGrid,
     Stack,
-    Table,
     Text,
 } from '@chakra-ui/react';
 import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
-import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
+import { Skeleton } from '../../components/ui/skeleton';
 import { clearAccounts, deleteAccount, getUserInfo, putUserInfo } from '@api/Account';
 import { delAccount, postAccount, postAccountAreaSingle, postAccountImport } from '@api/Account';
 import { useEffect, useState } from 'react';
@@ -34,16 +31,15 @@ import { toaster } from '../../components/ui/toaster';
 import { useCountHook } from '../count';
 import { useDisclosure } from '@chakra-ui/react';
 import QuickActionPicker from './QuickActionPicker';
-import ConfigSyncModal from './ConfigSyncModal';
 import ResultSummaryModal, { ResultSummaryRow } from './ResultSummaryModal';
 import ResultInfoModal from './ResultInfoModal';
 import { loadQuickActions, saveQuickActions, QuickActionItem } from './quickActions';
-import { AccountInfo } from './AccountCard';
+import AccountListSection from './AccountListSection';
+import NotifySettings from './NotifySettings';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, textFitPadding, safeSetItem, NOTIFY_CANDIDATES } from './accountShared';
-import type { NotifyPrefs } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -75,8 +71,6 @@ export function DashBoard() {
     const [batchAccounts, setBatchAccounts] = useState<string[]>(() => loadBatch());
     // 「弹结果」：功能按钮执行完自动弹出结果汇总窗
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
-    // 周期通知：日常例行拉取各账号分模块结果，出警报（错误/中止）弹系统通知（整个会话只弹一次）
-    const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(() => loadNotifyPrefs());
     // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
     const busyRef = useRef(busyAccounts);
@@ -102,11 +96,6 @@ export function DashBoard() {
     useEffect(() => {
         safeSetItem('autopcr_popupResult', popupResult ? 'true' : 'false');
     }, [popupResult]);
-
-    useEffect(() => {
-        saveNotifyPrefs(notifyPrefs);
-    }, [notifyPrefs]);
-
 
     // 批次名单随账号列表自动剔除失效项（依赖名单序列化：删一加一 length 不变也能触发）
     useEffect(() => {
@@ -541,75 +530,7 @@ export function DashBoard() {
                         </Checkbox>
                     </Box>
                     <Box w="1px" h="1.25rem" bg="black" flexShrink={0} alignSelf="center" />
-                    <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>
-                        <Popover.Trigger asChild>
-                            <Box
-                                borderWidth="1px"
-                                borderColor="currentColor"
-                                borderRadius="md"
-                                px={2}
-                                h="2rem"
-                                display="flex"
-                                alignItems="center"
-                                gap={1}
-                                flexShrink={0}
-                                cursor="pointer"
-                                color="orange.500"
-                                _hover={{ bg: 'orange.subtle' }}
-                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。同类警报一个月内只弹一次（活动h本扫荡不去重）。需停留在本站页面。"
-                            >
-                                <Checkbox
-                                    checked={notifyPrefs.enabled}
-                                    onCheckedChange={async (details) => {
-                                        const next = !!details.checked;
-                                        if (next && 'Notification' in window && Notification.permission === 'default') {
-                                            try {
-                                                await Notification.requestPermission();
-                                            } catch {
-                                                // 用户拒绝或浏览器不支持时仍可开启，未授权期间用站内提示
-                                            }
-                                        }
-                                        setNotifyPrefs((prev) => ({ ...prev, enabled: next }));
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                    colorPalette="orange"
-                                    size="md"
-                                    aria-label="开启周期通知"
-                                />
-                                <Text color="orange.500" css={{ cursor: 'pointer', userSelect: 'none' }}>
-                                    周期通知
-                                </Text>
-                                <FiPlus />
-                            </Box>
-                        </Popover.Trigger>
-                        <Popover.Positioner>
-                            <Popover.Content width="auto" minW="200px" zIndex={1400}>
-                                <Popover.Body p={3}>
-                                    <Stack gap={2}>
-                                        {NOTIFY_CANDIDATES.map((c) => (
-                                            <Checkbox
-                                                key={c.key}
-                                                checked={!notifyPrefs.muted.includes(c.key)}
-                                                onCheckedChange={(details) => {
-                                                    const notifyOn = !!details.checked;
-                                                    setNotifyPrefs((prev) => ({
-                                                        ...prev,
-                                                        muted: notifyOn
-                                                        ? prev.muted.filter((k) => k !== c.key)
-                                                        : [...prev.muted, c.key],
-                                                    }));
-                                                }}
-                                                colorPalette="orange"
-                                                size="md"
-                                            >
-                                                {c.label}
-                                            </Checkbox>
-                                        ))}
-                                    </Stack>
-                                </Popover.Body>
-                            </Popover.Content>
-                        </Popover.Positioner>
-                    </Popover.Root>
+                        <NotifySettings />
                 </Flex>
 
                 <HStack gap={2}>
@@ -734,122 +655,22 @@ export function DashBoard() {
                 {' '}
             </Alert>
 
-            {isTableView ? (
-                <Box borderRadius="xl">
-                    <Table.Root variant="outline" colorPalette="blue" size="sm" bg="bg.panel" borderRadius="xl" boxShadow="sm" ml="0" mr="auto">
-                        <Table.Header position="sticky" top={0} bg="bg.subtle" zIndex={1} boxShadow="sm">
-                            <Table.Row>
-                                <Table.ColumnHeader px={0} fontSize="md" py={4} fontWeight="bold" width="5%" textAlign="center">
-                                    <Checkbox
-                                        checked={
-                                            (selectedAccounts.length > 0 && selectedAccounts.length < (userInfo?.accounts?.length ?? 0))
-                                                ? "indeterminate"
-                                                : (selectedAccounts.length > 0 && selectedAccounts.length === userInfo?.accounts?.length)
-                                        }
-                                        onCheckedChange={toggleSelectAll}
-                                        colorPalette="blue"
-                                        size="md"
-                                        css={{
-                                            '& [data-part=control], & .chakra-checkbox__control': {
-                                                borderRadius: '9999px',
-                                                width: '1.25rem',
-                                                height: '1.25rem',
-                                            },
-                                        }}
-                                    />
-                                </Table.ColumnHeader>
-                                <Table.ColumnHeader px={0} fontSize="md" py={4} fontWeight="bold" width="25%" minWidth="80px">
-                                    账号
-                                </Table.ColumnHeader>
-                                <Table.ColumnHeader px={3} fontSize="md" py={4} fontWeight="bold" width="30%">
-                                    最近记录
-                                </Table.ColumnHeader>
-                                <Table.ColumnHeader px={3} fontSize="md" py={4} fontWeight="bold" width="30%">
-                                    操作
-                                </Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                            {!userInfo ? (
-                                Array.from({ length: 5 }).map((_, i) => (
-                                    <Table.Row key={i} bg="transparent">
-                                        <Table.Cell px={3} py={2}><Skeleton height="20px" width="20px" /></Table.Cell>
-                                        <Table.Cell px={0} py={2}><Skeleton height="20px" width="80%" /></Table.Cell>
-                                        <Table.Cell px={3} py={2}><Skeleton height="20px" width="60%" /></Table.Cell>
-                                        <Table.Cell px={3} py={2}><Skeleton height="32px" width="100%" /></Table.Cell>
-                                    </Table.Row>
-                                ))
-                            ) : (
-                                userInfo?.accounts?.map((account) => (
-                                    <AccountInfo
-                                        key={account.name}
-                                        account={account}
-                                        onToggle={freshAccountInfo.onToggle}
-                                        increaseCount={increaseCount}
-                                        decreaseCount={decreaseCount}
-                                        updateAccountInfo={updateAccountInfo}
-                                        isTableView={isTableView}
-                                        isSelected={selectedAccounts.includes(account.name)}
-                                        onToggleSelect={() => toggleSelectAccount(account.name)}
-                                        batchAccounts={batchAccounts}
-                                        getOccupiedNames={occupiedNamesFactory}
-                                        isBusy={busyAccounts.has(account.name)}
-                                        onBusyChange={setAccountBusy}
-                                        onOpenSyncConfig={(a) => {
-                                            NiceModal.show(ConfigSyncModal, { sourceAccount: a });
-                                        }}
-                                    />
-                                ))
-                            )}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
-            ) : (
-                <Box p={1}>
-                    <Box mb={2}>
-                        <Checkbox
-                            checked={allSelected ? true : selectedAccounts.length > 0 ? 'indeterminate' : false}
-                            onCheckedChange={toggleSelectAll}
-                            colorPalette="blue"
-                            size="md"
-                        >
-                            全选账号
-                        </Checkbox>
-                    </Box>
-                    <SimpleGrid gap={4} templateColumns="repeat(auto-fill, minmax(280px, 1fr))">
-                        {!userInfo ? (
-                            Array.from({ length: 4 }).map((_, i) => (
-                                <Card.Root key={i} bg="bg.panel" borderRadius="2xl" shadow="sm">
-                                    <Card.Header><Skeleton height="24px" width="50%" /></Card.Header>
-                                    <Card.Body><SkeletonText noOfLines={3} gap={4} /></Card.Body>
-                                    <Card.Footer><Skeleton height="32px" width="100%" /></Card.Footer>
-                                </Card.Root>
-                            ))
-                        ) : (
-                            userInfo?.accounts?.map((account) => (
-                                <AccountInfo
-                                    key={account.name}
-                                    account={account}
-                                    onToggle={freshAccountInfo.onToggle}
-                                    increaseCount={increaseCount}
-                                    decreaseCount={decreaseCount}
-                                    updateAccountInfo={updateAccountInfo}
-                                    isTableView={isTableView}
-                                    isSelected={selectedAccounts.includes(account.name)}
-                                    onToggleSelect={() => toggleSelectAccount(account.name)}
-                                    batchAccounts={batchAccounts}
-                                    getOccupiedNames={occupiedNamesFactory}
-                                    isBusy={busyAccounts.has(account.name)}
-                                    onBusyChange={setAccountBusy}
-                                    onOpenSyncConfig={(a) => {
-                                        NiceModal.show(ConfigSyncModal, { sourceAccount: a });
-                                    }}
-                                />
-                            ))
-                        )}
-                    </SimpleGrid>
-                </Box>
-            )}
+            <AccountListSection
+                userInfo={userInfo}
+                isTableView={isTableView}
+                selectedAccounts={selectedAccounts}
+                batchAccounts={batchAccounts}
+                busyAccounts={busyAccounts}
+                allSelected={allSelected}
+                toggleSelectAll={toggleSelectAll}
+                toggleSelectAccount={toggleSelectAccount}
+                onRefresh={freshAccountInfo.onToggle}
+                increaseCount={increaseCount}
+                decreaseCount={decreaseCount}
+                updateAccountInfo={updateAccountInfo}
+                setAccountBusy={setAccountBusy}
+                occupiedNamesFactory={occupiedNamesFactory}
+            />
         </Stack>
     );
 }
