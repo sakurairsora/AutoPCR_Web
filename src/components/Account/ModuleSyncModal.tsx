@@ -20,6 +20,7 @@ import { getUserInfo } from '@api/Account';
 import { useEffect, useState } from 'react';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
+import { getErrorDescription } from './Config';
 
 interface ModuleSyncModalProps {
     sourceAlias: string;
@@ -38,11 +39,11 @@ export default NiceModal.create(({ sourceAlias, moduleName }: ModuleSyncModalPro
                 setIsLoading(true);
                 try {
                     const userInfo = await getUserInfo();
-                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAlias) || [];
+                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAlias && name !== 'BATCH_RUNNER') || [];
                     setAllAccounts(accounts);
                     setSelectedTargets(accounts);
                 } catch (err) {
-                    toaster.create({ type: 'error', title: '获取账号列表失败', description: String(err) });
+                    toaster.create({ type: 'error', title: '获取账号列表失败', description: await getErrorDescription(err) });
                 } finally {
                     setIsLoading(false);
                 }

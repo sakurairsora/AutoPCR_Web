@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import { AreaInfo } from '@/interfaces/Account';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
+import { getErrorDescription } from './Config';
 
 interface ConfigSyncModalProps {
     sourceAccount: string;
@@ -52,7 +53,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
                 try {
                     // 1. Get All Accounts
                     const userInfo = await getUserInfo();
-                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAccount) || [];
+                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAccount && name !== 'BATCH_RUNNER') || [];
                     setAllAccounts(accounts);
                     
                     // 2. Get Config Areas from Source Account
@@ -65,7 +66,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
                     setSelectedDailyModules(presetDailyModules || []);
 
                 } catch (err) {
-                    toaster.create({ type: 'error', title: '获取数据失败', description: String(err) });
+                    toaster.create({ type: 'error', title: '获取数据失败', description: await getErrorDescription(err) });
                 } finally {
                     setIsLoadingData(false);
                 }
@@ -93,7 +94,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
                     setSelectedDailyModules(allModuleKeys);
                     setSelectedAreas(prev => [...prev, key]);
                 } catch (err) {
-                    toaster.create({ type: 'error', title: '获取日常模块失败', description: String(err) });
+                    toaster.create({ type: 'error', title: '获取日常模块失败', description: await getErrorDescription(err) });
                 }
             } else {
                 setSelectedAreas(prev => prev.filter(k => k !== key));
@@ -129,7 +130,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
                     const allModuleKeys = Object.keys(moduleRes.info || {});
                     setSelectedDailyModules(allModuleKeys);
                 } catch (err) {
-                    toaster.create({ type: 'error', title: '获取日常模块失败', description: String(err) });
+                    toaster.create({ type: 'error', title: '获取日常模块失败', description: await getErrorDescription(err) });
                     return;
                 }
             }
@@ -206,7 +207,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
             }
 
         } catch (err: any) {
-            toaster.create({ type: 'error', title: '同步过程中发生错误', description: err?.message || String(err) });
+            toaster.create({ type: 'error', title: '同步过程中发生错误', description: await getErrorDescription(err) });
         } finally {
             setIsSyncing(false);
         }

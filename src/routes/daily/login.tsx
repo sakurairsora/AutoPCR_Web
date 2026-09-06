@@ -11,12 +11,24 @@ import { LuMoon, LuSun } from 'react-icons/lu'
 import LoginWithPasswordComponent from "@components/Login/LoginWithPasswordComponent"
 import { Skeleton } from '../../components/ui/skeleton'
 import autopcr from "@/assets/autopcr.svg"
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, isRedirect, redirect } from '@tanstack/react-router'
 import { keyframes } from '@emotion/react'
 import { useColorMode } from '../../components/ui/color-mode'
+import { API } from '@api/APIUtils'
+import { Route as AccountRoute } from '@routes/daily/_sidebar/account/index'
 
 export const Route = createFileRoute('/daily/login')({
     component: LoginComponent,
+    // 已登录时登录页没有意义，直接送去账号主页
+    beforeLoad: async () => {
+        try {
+            await API.get('/account', { skipErrorHandler: true, skipAuthRedirect: true })
+            throw redirect({ to: AccountRoute.to })
+        } catch (e) {
+            if (isRedirect(e)) throw e
+            // 未登录：留在登录页
+        }
+    },
 })
 
 const float = keyframes`

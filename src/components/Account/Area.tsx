@@ -1,98 +1,237 @@
-import { Box, Flex, IconButton, Popover, Stack, useDisclosure } from '@chakra-ui/react';
-import { useEffect, useState } from 'react'
+import { Box, Button, Flex, IconButton, Popover, Stack, Text, useDisclosure } from '@chakra-ui/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { FiCompass } from 'react-icons/fi';
-import Module from "./Module"
-import { ModuleResponse } from '@interfaces/Module';
+import Module from './Module';
+import { ConfigValue, ModuleResponse } from '@interfaces/Module';
 import { Skeleton } from '../../components/ui/skeleton';
-import Toc from "./Toc"
-import { getAccountConfig } from '@api/Account'
-import { keyframes } from '@emotion/react'
+import Toc from './Toc';
+import { getAccountConfig } from '@api/Account';
+import { toaster } from '../../components/ui/toaster';
 
 interface AreaProps {
-    alias: string,
-    keys: string,
-    areaName: string
+    alias: string;
+    keys: string;
+    areaName: string;
+    showOnlyFav?: boolean;
 }
 
 export interface TocItem {
-    name: string,
-    id: string
+    name: string;
+    id: string;
 }
 
-export default function Area({ alias, keys: key, areaName }: AreaProps) {
+/** 区服配置数据缓存：只存 JSON，不占 React/DOM。UI 卸载后数据仍在。 */
+const areaConfigCache = new Map<string, ModuleResponse>();
 
-    const [config, setConfig] = useState<ModuleResponse | null>(null);
-    const { open, onOpen, onClose } = useDisclosure()
+function cacheKey(alias: string, key: string) {
+    return `${alias}::${key}`;
+}
+
+export function getCachedAreaConfig(alias: string, key: string) {
+    return areaConfigCache.get(cacheKey(alias, key));
+}
+
+export function setCachedAreaConfig(alias: string, key: string, data: ModuleResponse) {
+    areaConfigCache.set(cacheKey(alias, key), data);
+}
+
+/** 离开账号详情 / 导入配置成功后调用，释放该账号缓存 */
+export function clearAreaConfigCache(alias?: string) {
+    if (!alias) {
+        areaConfigCache.clear();
+        return;
+    }
+    for (const k of [...areaConfigCache.keys()]) {
+        if (k.startsWith(`${alias}::`)) areaConfigCache.delete(k);
+    }
+}
+
+function mergeFavIntoConfig(alias: string, key: string, res: ModuleResponse): ModuleResponse {
+    const favKey = `autopcr_fav_${alias}`;
+    const stored = localStorage.getItem(favKey);
+    if (!stored) return res;
+    try {
+        const favMap = JSON.parse(stored) as Record<string, string[]>;
+        const areaFavs = favMap[key] || [];
+        if (areaFavs.length === 0) return res;
+        const mergedConfig = { ...res.config };
+        areaFavs.forEach((moduleKey) => {
+            mergedConfig[`_fav_${moduleKey}`] = true;
+        });
+        return { ...res, config: mergedConfig };
+    } catch {
+        return res;
+    }
+}
+
+export default function Area({ alias, keys: key, areaName, showOnlyFav = false }: AreaProps) {
+    const cached = alias && key ? getCachedAreaConfig(alias, key) : undefined;
+
+    const [retryTick, setRetryTick] = useState(0);
+    const [state, setState] = useState<{
+        config: ModuleResponse | null;
+        isLoading: boolean;
+        error: boolean;
+    }>(() => ({
+        config: cached ?? null,
+        isLoading: !cached,
+        error: false,
+    }));
+
+    const { open, onOpen, onClose } = useDisclosure();
+    const [tocOpen, setTocOpen] = useState(false);
 
     useEffect(() => {
-        if (alias && key) {
-            getAccountConfig(alias, key).then((res) => {
-                setConfig(res)
-            }).catch((err) => {
-                console.log(err);
-            })
+        let isMounted = true;
+        if (!alias || !key) return;
+
+        const hit = getCachedAreaConfig(alias, key);
+        if (hit) {
+            const withFav = mergeFavIntoConfig(alias, key, hit);
+            if (withFav !== hit) {
+                setCachedAreaConfig(alias, key, withFav);
+            }
+            setState({ config: withFav, isLoading: false, error: false });
+            return () => {
+                isMounted = false;
+            };
         }
-    }, [alias, key]);
 
-    const tocList: TocItem[] = [];
-    config?.order.map((module) => {
-        tocList.push({ name: config.info[module].name, id: module })
-    })
+        setState({ config: null, isLoading: true, error: false });
 
-    const fade = keyframes`
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    `
+        getAccountConfig(alias, key)
+            .then((res) => {
+                if (!isMounted) return;
+                const finalRes = mergeFavIntoConfig(alias, key, res);
+                setCachedAreaConfig(alias, key, finalRes);
+                setState({ config: finalRes, isLoading: false, error: false });
+            })
+            .catch((err) => {
+                if (isMounted) {
+                    console.error(err);
+                    setState({ config: null, isLoading: false, error: true });
+                    toaster.create({
+                        type: 'error',
+                        title: '加载配置失败',
+                        description: '请检查网络后重试',
+                    });
+                }
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [alias, key, retryTick]);
+
+    const handleConfigUpdate = useCallback((configKey: string, value: ConfigValue) => {
+        setState((prev) => {
+            if (!prev.config) return prev;
+            const nextConfig: ModuleResponse = {
+                ...prev.config,
+                config: { ...prev.config.config, [configKey]: value },
+            };
+            return { ...prev, config: nextConfig };
+        });
+    }, []);
+
+    // state.config 变化时同步到会话缓存（离开区服 UI 后仍能秒开且带最新改动）
+    useEffect(() => {
+        if (!alias || !key || !state.config) return;
+        setCachedAreaConfig(alias, key, state.config);
+    }, [alias, key, state.config]);
+
+    const config = state.config;
+
+    const visibleModules = useMemo(() => {
+        if (!config) return [];
+        return showOnlyFav
+            ? config.order.filter((moduleKey) => config.config[`_fav_${moduleKey}`] === true)
+            : config.order;
+    }, [config, showOnlyFav]);
+
+    const tocList: TocItem[] = useMemo(() => {
+        if (!config) return [];
+        return visibleModules
+            .filter((moduleKey) => config.info?.[moduleKey])
+            .map((moduleKey) => ({
+                name: config.info[moduleKey]?.name || moduleKey,
+                id: moduleKey,
+            }));
+    }, [config, visibleModules]);
 
     return (
-        <Box animation={`${fade} 0.5s ease-out`} pb={20}>
-            <Stack gap={4}>
-                {!config ? (
-                    Array.from({ length: 4 }).map((_, i) => (
-                        <Box key={i} p={6} borderWidth="1px" borderRadius="2xl" bg="bg.panel" shadow="sm">
-                            <Skeleton height="30px" width="40%" mb={4} />
-                             <Skeleton height="20px" width="100%" mb={2} />
-                             <Skeleton height="20px" width="80%" mb={2} />
-                             <Skeleton height="20px" width="90%" mb={6} />
-                             <Skeleton height="40px" width="100%" />
+        <>
+            <Box pb={20} position="relative">
+                <Stack gap={4}>
+                    {state.isLoading && !config ? (
+                        Array.from({ length: 4 }).map((_, i) => (
+                            <Box key={i} p={6} borderWidth="1px" borderRadius="2xl" bg="bg.panel" shadow="sm">
+                                <Skeleton height="30px" width="40%" mb={4} />
+                                <Skeleton height="20px" width="100%" mb={2} />
+                                <Skeleton height="20px" width="80%" mb={2} />
+                                <Skeleton height="20px" width="90%" mb={6} />
+                                <Skeleton height="40px" width="100%" />
+                            </Box>
+                        ))
+                    ) : state.error && !config ? (
+                        <Box p={6} borderWidth="1px" borderRadius="2xl" bg="bg.panel" shadow="sm" textAlign="center">
+                            <Text color="fg.muted" mb={3}>加载配置失败，请检查网络后重试</Text>
+                            <Button colorPalette="blue" onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
                         </Box>
-                    ))
-                ) : (
-                    config?.order.map((module) => (
-                        <Module key={module} id={module} alias={alias} areaKey={key} areaName={areaName} config={config?.config} info={(config.info[module])} isOpen={open} onOpen={onOpen} onClose={onClose} />
-                    ))
-                )}
-            </Stack>
+                    ) : (
+                        visibleModules.map((module) => {
+                            const moduleInfo = config?.info?.[module];
+                            if (!moduleInfo) return null;
 
-            {/* Floating TOC Button */}
-            <Flex position="fixed"
-                right="6"
+                            return (
+                                <Module
+                                    key={module}
+                                    id={module}
+                                    alias={alias}
+                                    areaKey={key}
+                                    areaName={areaName}
+                                    config={config?.config ?? {}}
+                                    info={moduleInfo}
+                                    isOpen={open}
+                                    onOpen={onOpen}
+                                    onClose={onClose}
+                                    onConfigUpdate={handleConfigUpdate}
+                                />
+                            );
+                        })
+                    )}
+                </Stack>
+            </Box>
+
+            <Flex
+                position="fixed"
+                right={{ base: '3', md: '6' }}
                 top="50%"
                 transform="translateY(-50%)"
                 justifyContent="center"
                 alignItems="center"
-                 zIndex={100}
+                zIndex={100}
             >
-                <Popover.Root lazyMount positioning={{ placement: 'left', gutter: 4 }}>
-                    <Popover.Trigger>
-                        <IconButton 
-                            aria-label='TOC'
+                <Popover.Root lazyMount open={tocOpen} onOpenChange={(d) => setTocOpen(d.open)} positioning={{ placement: 'left', gutter: 4 }}>
+                    <Popover.Trigger asChild>
+                        <IconButton
+                            aria-label="TOC"
                             colorPalette="blue"
-                            size="xl"
+                            size={{ base: 'lg', md: 'xl' }}
                             rounded="full"
                             shadow="xl"
-                            transition="all 0.2s"
-                            _hover={{ transform: "scale(1.1)", shadow: "2xl" }}
+                            transition="transform 0.2s ease"
+                            _hover={{ transform: 'scale(1.1)', shadow: '2xl' }}
                         >
                             <FiCompass />
                         </IconButton>
                     </Popover.Trigger>
                     <Popover.Content width="auto" minW="200px">
-                        <Toc maxH="60vh" tocList={tocList} />
+                        <Toc maxH="60vh" tocList={tocList} onNavigate={() => setTocOpen(false)} />
                     </Popover.Content>
                 </Popover.Root>
             </Flex>
-        </Box>
-    )
+        </>
+    );
 }

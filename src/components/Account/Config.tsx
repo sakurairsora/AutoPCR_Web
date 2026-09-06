@@ -1,4 +1,14 @@
-import { Box, Button, Checkbox as ChakraCheckbox, Input, NativeSelect, Stack, Text, Textarea } from '@chakra-ui/react';
+import {
+    Box,
+    Button,
+    Checkbox as ChakraCheckbox,
+    Flex,
+    Input,
+    NativeSelect,
+    Stack,
+    Text,
+    Textarea,
+} from '@chakra-ui/react';
 import { AxiosError } from 'axios';
 import NiceModal from '@ebay/nice-modal-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -10,26 +20,73 @@ import { NumberInput, NumberInputField } from '../../components/ui/number-input'
 import { Switch } from '../../components/ui/switch';
 import { toaster } from '../../components/ui/toaster';
 import multiSelectModal from './MultiSelectModal';
+import singleSelectModal from './SingleSelectModal';
 
 interface ConfigProps {
     alias: string;
     value: ConfigValue;
     info: ConfigInfo;
+    /** 回写父级 Area；折叠卸载后再展开必须靠它 */
+    onConfigUpdate?: (key: string, value: ConfigValue) => void;
 }
 
-/**
- * 通用受控配置 Hook
- * - 管理本地 state，外部 value 变化时自动同步
- * - 提供 save 方法，带乐观更新 + 失败回滚 + 卸载保护
- */
+const configSaveChains = new Map<string, Promise<unknown>>();
+
+export function enqueueConfigSave<T>(alias: string, task: () => Promise<T>): Promise<T> {
+    const prev = configSaveChains.get(alias) || Promise.resolve();
+    const next = prev.catch(() => undefined).then(task);
+    configSaveChains.set(
+        alias,
+        next.then(
+            () => undefined,
+            () => undefined,
+        ),
+    );
+    return next;
+}
+
+/** 安全解析后端错误文案，避免 Blob/.text 抛错或 [object Object] */
+export async function getErrorDescription(err: unknown, fallback = '网络错误'): Promise<string> {
+    const data = (err as { response?: { data?: unknown } })?.response?.data;
+    try {
+        if (data == null) {
+            if (err instanceof Error && err.message) return err.message;
+            return fallback;
+        }
+        if (typeof Blob !== 'undefined' && data instanceof Blob) {
+            const t = await data.text();
+            return t || fallback;
+        }
+        if (typeof data === 'string') return data || fallback;
+        if (typeof data === 'object') {
+            try {
+                return JSON.stringify(data);
+            } catch {
+                return fallback;
+            }
+        }
+        return String(data);
+    } catch {
+        return fallback;
+    }
+}
+
+const ROW_H = '2.25rem';
+const SINGLE_SEARCH_THRESHOLD = 30;
+
 function useConfigState<T>(
     alias: string,
     key: string,
     propValue: T,
-    transform?: (val: T) => ConfigValue
+    onConfigUpdate?: (key: string, value: ConfigValue) => void,
+    transform?: (val: T) => ConfigValue,
 ) {
     const [state, setState] = useState<T>(propValue);
     const mountedRef = useRef(true);
+    const propRef = useRef(propValue);
+    propRef.current = propValue;
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
 
     useEffect(() => {
         setState(propValue);
@@ -43,21 +100,25 @@ function useConfigState<T>(
     }, []);
 
     const save = async (newValue: T): Promise<void> => {
+        // 在乐观回写父级之前先记下旧值，失败时才能真正回滚
+        const previous = propRef.current;
         setState(newValue);
         const payload = transform ? transform(newValue) : (newValue as ConfigValue);
+        // 先写父级缓存，折叠/切 Tab 再展开仍是新值
+        onUpdateRef.current?.(key, payload);
         try {
-            const res = await putAccountConfig(alias, key, payload);
+            const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
         } catch (err) {
-            const axiosErr = err as AxiosError;
+            onUpdateRef.current?.(key, previous as ConfigValue);
             if (mountedRef.current) {
-                setState(propValue);
+                setState(previous);
                 toaster.create({
                     type: 'error',
                     title: '保存失败',
-                    description: axiosErr.response?.data as string || '网络错误',
+                    description: await getErrorDescription(err),
                 });
             }
         }
@@ -66,37 +127,42 @@ function useConfigState<T>(
     return [state, setState, save] as const;
 }
 
-// ---------- ConfigBool ----------
-function ConfigBool({ alias, value, info }: ConfigProps) {
-    const [checked, , save] = useConfigState(alias, info.key, value as boolean);
+
+function ConfigBool({ alias, value, info, onConfigUpdate }: ConfigProps) {
+    const [checked, , save] = useConfigState(alias, info.key, value as boolean, onConfigUpdate);
 
     return (
         <InputGroup
+            w="full"
+            minH={ROW_H}
+            alignItems="center"
             startElement={info.desc}
             endElement={
                 <Switch
                     id={info.key}
+                    size="md"
                     checked={checked}
-                    onCheckedChange={(d) => save(d.checked)}
+                    onCheckedChange={(d) => save(!!d.checked)}
                 />
             }
         />
     );
 }
 
-// ---------- ConfigInt（改为 onBlur 保存）----------
-function ConfigInt({ alias, value, info }: ConfigProps) {
-    const min = Math.min(...(info.candidates.map((c) => c.value) as number[]));
-    const max = Math.max(...(info.candidates.map((c) => c.value) as number[]));
+function ConfigInt({ alias, value, info, onConfigUpdate }: ConfigProps) {
+    const candNums = (info.candidates || []).map((c) => c.value).filter((v): v is number => typeof v === 'number' && !isNaN(v));
+    const min = candNums.length ? Math.min(...candNums) : 0;
+    const max = candNums.length ? Math.max(...candNums) : Number.MAX_SAFE_INTEGER;
 
-    // 受控的字符串显示值
-    const [numStr, setNumStr] = useState(String(value));
-    const [saving, setSaving] = useState(false); // 可选 loading 态
+    const [numStr, setNumStr] = useState(value === undefined ? '' : String(value));
     const mountedRef = useRef(true);
+    const valueRef = useRef(value);
+    valueRef.current = value;
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
 
-    // 外部 value 同步
     useEffect(() => {
-        setNumStr(String(value));
+        setNumStr(value === undefined ? '' : String(value));
     }, [value]);
 
     useEffect(() => {
@@ -106,79 +172,192 @@ function ConfigInt({ alias, value, info }: ConfigProps) {
         };
     }, []);
 
-    // 处理失焦保存
     const handleBlur = () => {
-        let finalValue: string | number;
-
-        // 空值或无效值处理为最小值
-        if (numStr === '' || isNaN(Number(numStr))) {
-            finalValue = min;
-            setNumStr(String(min)); // UI 也回显最小值
-        } else {
-            finalValue = Number(numStr);
+        // 改动前已保存的值：清空/非法时恢复它，失败回滚也用它
+        const previous = valueRef.current;
+        const previousNum = typeof previous === 'number' ? previous : Number(previous);
+        const parsed = Number(numStr);
+        if (numStr === '' || isNaN(parsed)) {
+            // 清空或非法输入：恢复为改动前的值，不保存
+            setNumStr(Number.isFinite(previousNum) ? String(previousNum) : '');
+            return;
         }
-
-        // 边界检查（可选，但保留原有行为）
+        let finalValue = Math.round(parsed); // 小数四舍五入取整
         if (finalValue < min) finalValue = min;
         if (finalValue > max) finalValue = max;
+        if (Number.isFinite(previousNum) && finalValue === previousNum) {
+            // 内容没变：只规范显示，不发保存
+            setNumStr(String(finalValue));
+            return;
+        }
+        setNumStr(String(finalValue));
+        onUpdateRef.current?.(info.key, finalValue as ConfigValue);
 
-        // 发送保存
-        const payload: ConfigValue = finalValue as ConfigValue;
-        putAccountConfig(alias, info.key, payload)
+        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, finalValue as ConfigValue))
             .then((res) => {
                 if (mountedRef.current) {
                     toaster.create({ type: 'success', title: '保存成功', description: res });
                 }
             })
-            .catch((err: AxiosError) => {
+            .catch(async (err: AxiosError) => {
+                onUpdateRef.current?.(info.key, previous as ConfigValue);
                 if (mountedRef.current) {
-                    // 失败回滚到外部 value
-                    setNumStr(String(value));
+                    setNumStr(Number.isFinite(previousNum) ? String(previousNum) : String(min));
                     toaster.create({
                         type: 'error',
                         title: '保存失败',
-                        description: err.response?.data as string || '网络错误',
+                        description: await getErrorDescription(err),
                     });
                 }
             });
     };
 
-    // 输入过程中仅更新本地状态
-    const handleChange = (e: { value: string }) => {
-        setNumStr(e.value);
-    };
-
     return (
-        <InputGroup startElement={info.desc}>
-            <NumberInput
-                value={numStr}
-                onValueChange={handleChange}
-                id={info.key}
-                min={min}
-                max={max}
+        <InputGroup w="full" minH={ROW_H} alignItems="center" startElement={info.desc}>
+            <Box
+                w="18%"
+                h={ROW_H}
+                maxH={ROW_H}
+                display="flex"
+                alignItems="center"
+                css={{
+                    '& [data-part="root"]': {
+                        height: ROW_H,
+                        maxHeight: ROW_H,
+                        width: '100%',
+                    },
+                    '& [data-part="input"]': {
+                        height: ROW_H,
+                        minHeight: ROW_H,
+                        maxHeight: ROW_H,
+                        py: 0,
+                    },
+                    '& [data-part="control"]': {
+                        height: ROW_H,
+                        maxHeight: ROW_H,
+                        display: 'flex',
+                        flexDirection: 'column',
+                    },
+                    '& [data-part="increment-trigger"], & [data-part="decrement-trigger"]': {
+                        height: '1.125rem',
+                        minHeight: '1.125rem',
+                        maxHeight: '1.125rem',
+                        flex: 1,
+                    },
+                }}
             >
-                <NumberInputField onBlur={handleBlur} />
-            </NumberInput>
+                <NumberInput
+                    value={numStr}
+                    onValueChange={(e) => setNumStr(e.value)}
+                    id={info.key}
+                    min={min}
+                    max={max}
+                    size="sm"
+                    w="full"
+                    h={ROW_H}
+                    maxH={ROW_H}
+                >
+                    <NumberInputField h={ROW_H} minH={ROW_H} maxH={ROW_H} py={0} onBlur={handleBlur} />
+                </NumberInput>
+            </Box>
         </InputGroup>
     );
 }
 
-// ---------- ConfigSingle ----------
-function ConfigSingle({ alias, value, info }: ConfigProps) {
-    const [selectValue, , save] = useConfigState(alias, info.key, value as string | number);
+
+function ConfigSingleSearch({ alias, value, info, onConfigUpdate }: ConfigProps) {
+    const [localValue, setLocalValue] = useState<ConfigValue>(value);
+    const mountedRef = useRef(true);
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
+
+    useEffect(() => {
+        setLocalValue(value);
+    }, [value]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    const displayText = (() => {
+        const unit = info.candidates.find((u) => u.value === localValue);
+        if (!unit) {
+            return localValue === undefined || localValue === null || localValue === ''
+                ? ''
+                : String(localValue);
+        }
+        return unit.nickname ? unit.nickname : unit.display;
+    })();
+
+    const handleClick = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const previousValue = localValue;
+        try {
+            const ret = (await NiceModal.show(singleSelectModal, {
+                candidates: info.candidates,
+                value: localValue,
+            })) as ConfigValue | undefined;
+            if (ret === undefined) return;
+
+            // 乐观更新显示，失败再回滚
+            setLocalValue(ret);
+            onUpdateRef.current?.(info.key, ret);
+            const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, ret));
+            if (mountedRef.current) {
+                toaster.create({ type: 'success', title: '保存成功', description: res });
+            }
+        } catch (err) {
+            onUpdateRef.current?.(info.key, previousValue);
+            try { await NiceModal.hide(singleSelectModal); } catch { /* ignore */ }
+            if (mountedRef.current) {
+                setLocalValue(previousValue);
+                toaster.create({
+                    type: 'error',
+                    title: '保存失败',
+                    description: await getErrorDescription(err),
+                });
+            }
+        }
+    };
 
     return (
-        <InputGroup startElement={info.desc}>
-            <NativeSelect.Root>
+        <InputGroup
+            w="1/3"
+            minH={ROW_H}
+            alignItems="center"
+            startElement={info.desc}
+            endElement={
+                <Button size="sm" h={ROW_H} onClick={handleClick}>
+                    选择
+                </Button>
+            }
+        >
+            <Input h={ROW_H} value={displayText} readOnly onClick={handleClick} cursor="pointer" />
+        </InputGroup>
+    );
+}
+
+function ConfigSingleSelect({ alias, value, info, onConfigUpdate }: ConfigProps) {
+    const [selectValue, , save] = useConfigState(alias, info.key, value as string | number, onConfigUpdate);
+
+    return (
+        <InputGroup w="1/4" minH={ROW_H} alignItems="center" startElement={info.desc}>
+            <NativeSelect.Root size="sm" w="full" flex="1">
                 <NativeSelect.Field
-                    onChange={(e) => {
-                        let newValue: ConfigValue = e.target.value;
-                        const intVal = Number(newValue);
-                        if (!isNaN(intVal)) newValue = intVal;
-                        save(newValue);
-                    }}
+                    h={ROW_H}
                     id={info.key}
                     value={selectValue}
+                    onChange={(e) => {
+                        // 优先按候选值原本的类型保存，避免"01"这类字符串被强转成数字
+                        const match = info.candidates.find((c) => String(c.value) === e.target.value);
+                        const newValue: ConfigValue = match
+                            ? (match.value as string | number)
+                            : (isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value));
+                        void save(newValue);
+                    }}
                 >
                     {info.candidates.map((element) => (
                         <option
@@ -194,15 +373,28 @@ function ConfigSingle({ alias, value, info }: ConfigProps) {
     );
 }
 
-// ---------- ConfigMulti ----------
-function ConfigMulti({ alias, value, info }: ConfigProps) {
+/** 路由组件：条件分支里不调用 Hook，避免违反 Rules of Hooks */
+function ConfigSingle(props: ConfigProps) {
+    if ((props.info.candidates?.length || 0) >= SINGLE_SEARCH_THRESHOLD) {
+        return <ConfigSingleSearch {...props} />;
+    }
+    return <ConfigSingleSelect {...props} />;
+}
+
+
+function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const initialStrArr = useMemo(
-        () => (value as (string | number)[]).map(String),
-        [JSON.stringify(value)]
+        () => ((value as (string | number)[] | undefined) ?? []).map(String),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [JSON.stringify(value)],
     );
 
     const [groupValue, setGroupValue] = useState(initialStrArr);
     const mountedRef = useRef(true);
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
+    const initialRef = useRef(initialStrArr);
+    initialRef.current = initialStrArr;
 
     useEffect(() => {
         setGroupValue(initialStrArr);
@@ -210,93 +402,125 @@ function ConfigMulti({ alias, value, info }: ConfigProps) {
 
     useEffect(() => {
         mountedRef.current = true;
-        return () => { mountedRef.current = false; };
+        return () => {
+            mountedRef.current = false;
+        };
     }, []);
 
     const handleSave = (newStrArr: string[]) => {
         let postValue: ConfigValue = newStrArr;
         const intArr = newStrArr.map(Number);
-        if (intArr.length > 0 && !isNaN(intArr[0])) postValue = intArr;
+        if (intArr.length > 0 && intArr.every((n) => !isNaN(n))) postValue = intArr;
 
+        // 乐观回写前先记旧值，失败才能真正回滚
+        const rollback = initialRef.current;
         setGroupValue(newStrArr);
-        putAccountConfig(alias, info.key, postValue)
+        onUpdateRef.current?.(info.key, postValue);
+        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, postValue))
             .then((res) => {
-                if (mountedRef.current)
-                    toaster.create({ type: 'success', title: '保存成功', description: res });
-            })
-            .catch((err: AxiosError) => {
                 if (mountedRef.current) {
-                    setGroupValue(initialStrArr);
+                    toaster.create({ type: 'success', title: '保存成功', description: res });
+                }
+            })
+            .catch(async (err: AxiosError) => {
+                let rollbackPayload: ConfigValue = rollback;
+                const ints = rollback.map(Number);
+                if (ints.length > 0 && ints.every((n) => !isNaN(n))) rollbackPayload = ints;
+                onUpdateRef.current?.(info.key, rollbackPayload);
+                if (mountedRef.current) {
+                    setGroupValue(rollback);
                     toaster.create({
                         type: 'error',
                         title: '保存失败',
-                        description: err.response?.data as string || '网络错误',
+                        description: await getErrorDescription(err),
                     });
                 }
             });
     };
 
-    const onCheckboxChange = (param: string[] | { value: string[] }) => {
-        const newValue = Array.isArray(param) ? param : param.value;
-        handleSave(newValue);
-    };
-
     return (
-        <InputGroup startElement={info.desc}>
-            <Box
-                paddingLeft="16px"
-                paddingRight="32px"
-                overflowY="scroll"
-                borderWidth="1px"
-                borderColor="border.subtle"
-                borderRadius="md"
+        <InputGroup w="full" minH={ROW_H} alignItems="center" startElement={info.desc}>
+            <ChakraCheckbox.Group
+                value={groupValue}
                 w="full"
+                px={2}
+                onValueChange={(param: string[] | { value: string[] }) => {
+                    const newValue = Array.isArray(param) ? param : param.value;
+                    handleSave(newValue);
+                }}
             >
-                <ChakraCheckbox.Group onValueChange={onCheckboxChange} value={groupValue}>
-                    <Stack gap={[1, 5]} direction={['column', 'row']}>
-                        {info.candidates.map((element) => (
-                            <Checkbox
-                                key={element.value as string | number}
-                                value={String(element.value)}
-                            >
-                                {element.display}
-                            </Checkbox>
-                        ))}
-                    </Stack>
-                </ChakraCheckbox.Group>
-            </Box>
+                <Flex flexWrap="wrap" gap={3} align="center" w="full" py={1}>
+                    {info.candidates.map((element) => (
+                        <Checkbox
+                            key={element.value as string | number}
+                            value={String(element.value)}
+                        >
+                            {element.display}
+                        </Checkbox>
+                    ))}
+                </Flex>
+            </ChakraCheckbox.Group>
         </InputGroup>
     );
 }
 
-// ---------- ConfigTime ----------
-function ConfigTime({ alias, value, info }: ConfigProps) {
+
+function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [timeStr, setTimeStr] = useState(value as string);
+    const mountedRef = useRef(true);
+    const valueRef = useRef(value);
+    valueRef.current = value;
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
 
     useEffect(() => {
         setTimeStr(value as string);
     }, [value]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
     const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+        const previous = (valueRef.current ?? '') as string;
         const newValue = e.target.value;
-        putAccountConfig(alias, info.key, newValue as ConfigValue)
+        if (newValue === previous) return; // 内容没变：不保存
+        if (!/^\d{2}:\d{2}$/.test(newValue)) {
+            // 格式不对：恢复原值并提示，不保存
+            setTimeStr(previous);
+            toaster.create({ type: 'warning', title: '时间格式应为 HH:MM，未保存' });
+            return;
+        }
+        setTimeStr(newValue);
+        onUpdateRef.current?.(info.key, newValue as ConfigValue);
+        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, newValue as ConfigValue))
             .then((res) => {
-                toaster.create({ type: 'success', title: '保存成功', description: res });
+                if (mountedRef.current) {
+                    toaster.create({ type: 'success', title: '保存成功', description: res });
+                }
             })
-            .catch((err: AxiosError) => {
-                setTimeStr(value as string);
-                toaster.create({
-                    type: 'error',
-                    title: '保存失败',
-                    description: err.response?.data as string || '网络错误',
-                });
+            .catch(async (err: AxiosError) => {
+                onUpdateRef.current?.(info.key, previous as ConfigValue);
+                if (mountedRef.current) {
+                    setTimeStr(previous);
+                    toaster.create({
+                        type: 'error',
+                        title: '保存失败',
+                        description: await getErrorDescription(err),
+                    });
+                }
             });
     };
 
     return (
-        <InputGroup startElement={info.desc}>
+        <InputGroup w="min" minH={ROW_H} alignItems="center" startElement={info.desc}>
             <Input
                 type="time"
+                h={ROW_H}
+                size="sm"
                 value={timeStr}
                 onChange={(e) => setTimeStr(e.target.value)}
                 onBlur={handleBlur}
@@ -306,14 +530,26 @@ function ConfigTime({ alias, value, info }: ConfigProps) {
     );
 }
 
-// ---------- ConfigText ----------
-function ConfigText({ alias, value, info }: ConfigProps) {
-    const [textStr, setTextStr] = useState(value as string);
+
+function ConfigText({ alias, value, info, onConfigUpdate }: ConfigProps) {
+    const [textStr, setTextStr] = useState((value ?? '') as string);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const mountedRef = useRef(true);
+    const valueRef = useRef(value);
+    valueRef.current = value;
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
 
     useEffect(() => {
-        setTextStr(value as string);
+        setTextStr((value ?? '') as string);
     }, [value]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
     useLayoutEffect(() => {
         const el = textareaRef.current;
@@ -324,39 +560,53 @@ function ConfigText({ alias, value, info }: ConfigProps) {
     }, [textStr]);
 
     const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+        const previous = (valueRef.current ?? '') as string;
         const newValue = e.target.value;
-        putAccountConfig(alias, info.key, newValue as ConfigValue)
+        if (newValue === previous) return; // 内容没变：不保存
+        setTextStr(newValue);
+        onUpdateRef.current?.(info.key, newValue as ConfigValue);
+        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, newValue as ConfigValue))
             .then((res) => {
-                toaster.create({ type: 'success', title: '保存成功', description: res });
+                if (mountedRef.current) {
+                    toaster.create({ type: 'success', title: '保存成功', description: res });
+                }
             })
-            .catch((err: AxiosError) => {
-                setTextStr(value as string);
-                toaster.create({
-                    type: 'error',
-                    title: '保存失败',
-                    description: err.response?.data as string || '网络错误',
-                });
+            .catch(async (err: AxiosError) => {
+                onUpdateRef.current?.(info.key, previous as ConfigValue);
+                if (mountedRef.current) {
+                    setTextStr(previous);
+                    toaster.create({
+                        type: 'error',
+                        title: '保存失败',
+                        description: await getErrorDescription(err),
+                    });
+                }
             });
     };
 
     return (
-        <>
-            <Text>{info.desc}</Text>
+        <Stack gap={1} w="full">
+            <Text fontSize="sm" color="fg.muted">
+                {info.desc}
+            </Text>
             <Textarea
                 ref={textareaRef}
                 value={textStr}
                 onChange={(e) => setTextStr(e.target.value)}
                 onBlur={handleBlur}
                 id={info.key}
+                minH={ROW_H}
             />
-        </>
+        </Stack>
     );
 }
 
-// ---------- ConfigMultiSearch ----------
-function ConfigMultiSearch({ alias, value, info }: ConfigProps) {
+
+function ConfigMultiSearch({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [localValue, setLocalValue] = useState<ConfigValue>(value);
     const mountedRef = useRef(true);
+    const onUpdateRef = useRef(onConfigUpdate);
+    onUpdateRef.current = onConfigUpdate;
 
     useEffect(() => {
         setLocalValue(value);
@@ -364,11 +614,13 @@ function ConfigMultiSearch({ alias, value, info }: ConfigProps) {
 
     useEffect(() => {
         mountedRef.current = true;
-        return () => { mountedRef.current = false; };
+        return () => {
+            mountedRef.current = false;
+        };
     }, []);
 
     const displayValue = ((localValue || []) as number[]).map((id) => {
-        const unit = info.candidates.find((unit) => unit.value === id);
+        const unit = info.candidates.find((u) => u.value === id);
         return unit ? (unit.nickname ? unit.nickname : unit.display) : String(id);
     });
 
@@ -378,24 +630,26 @@ function ConfigMultiSearch({ alias, value, info }: ConfigProps) {
         try {
             const ret = (await NiceModal.show(multiSelectModal, {
                 candidates: info.candidates,
-                value: localValue as ConfigValue[],
+                value: (localValue ?? []) as ConfigValue[],
             })) as ConfigValue;
             if (ret === undefined) return;
 
-            const res = await putAccountConfig(alias, info.key, ret);
+            // show 关闭后已 resolve，成功路径不要再 hide，否则可能进 catch 误回滚
+            setLocalValue(ret);
+            onUpdateRef.current?.(info.key, ret);
+            const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, ret));
             if (mountedRef.current) {
-                setLocalValue(ret);
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
-            await NiceModal.hide(multiSelectModal);
         } catch (err) {
-            const axiosErr = err as AxiosError;
+            onUpdateRef.current?.(info.key, previousValue);
+            try { await NiceModal.hide(multiSelectModal); } catch { /* ignore */ }
             if (mountedRef.current) {
                 setLocalValue(previousValue);
                 toaster.create({
                     type: 'error',
                     title: '保存失败',
-                    description: axiosErr.response?.data as string || '网络错误',
+                    description: await getErrorDescription(err),
                 });
             }
         }
@@ -403,35 +657,43 @@ function ConfigMultiSearch({ alias, value, info }: ConfigProps) {
 
     return (
         <InputGroup
+            w="1/3"
+            minH={ROW_H}
+            alignItems="center"
             startElement={info.desc}
             endElement={
-                <Button size="sm" onClick={handleClick}>
+                <Button size="sm" h={ROW_H} onClick={handleClick}>
                     选择
                 </Button>
             }
         >
-            <Input value={displayValue.join(', ')} readOnly onClick={handleClick} cursor="pointer" />
+            <Input
+                h={ROW_H}
+                value={displayValue.join(', ')}
+                readOnly
+                onClick={handleClick}
+                cursor="pointer"
+            />
         </InputGroup>
     );
 }
 
-// ---------- 主组件 ----------
-export default function Config({ alias, value, info }: ConfigProps) {
+export default function Config({ alias, value, info, onConfigUpdate }: ConfigProps) {
     switch (info?.config_type) {
         case 'bool':
-            return <ConfigBool alias={alias} value={value} info={info} />;
+            return <ConfigBool alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'int':
-            return <ConfigInt alias={alias} value={value} info={info} />;
+            return <ConfigInt alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'single':
-            return <ConfigSingle alias={alias} value={value} info={info} />;
+            return <ConfigSingle alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'multi':
-            return <ConfigMulti alias={alias} value={value} info={info} />;
+            return <ConfigMulti alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'time':
-            return <ConfigTime alias={alias} value={value} info={info} />;
+            return <ConfigTime alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'text':
-            return <ConfigText alias={alias} value={value} info={info} />;
+            return <ConfigText alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         case 'multi_search':
-            return <ConfigMultiSearch alias={alias} value={value} info={info} />;
+            return <ConfigMultiSearch alias={alias} value={value} info={info} onConfigUpdate={onConfigUpdate} />;
         default:
             return null;
     }
