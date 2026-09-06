@@ -47,3 +47,42 @@ export function saveBatch(accounts: string[]): void {
         // 本地存储不可用则仅本次会话有效
     }
 }
+
+/** 周期通知：开关 + 静音名单（模块 key），存本地 */
+export interface NotifyPrefs {
+    enabled: boolean;
+    /** 静音的模块 key：这些模块出警报也不弹系统通知 */
+    muted: string[];
+}
+
+const NOTIFY_KEY = 'autopcr_notify_v1';
+
+export function loadNotifyPrefs(): NotifyPrefs {
+    try {
+        const raw = localStorage.getItem(NOTIFY_KEY);
+        const parsed = raw ? (JSON.parse(raw) as Partial<NotifyPrefs>) : null;
+        return {
+            enabled: !!parsed?.enabled,
+            muted: Array.isArray(parsed?.muted) ? parsed.muted.filter((x): x is string => typeof x === 'string') : [],
+        };
+    } catch {
+        return { enabled: false, muted: [] };
+    }
+}
+
+export function saveNotifyPrefs(prefs: NotifyPrefs): void {
+    try {
+        localStorage.setItem(NOTIFY_KEY, JSON.stringify(prefs));
+    } catch {
+        // 本地存储不可用则仅本次会话有效
+    }
+}
+
+/** 本次浏览器会话是否已弹过周期通知（多个号只弹一次） */
+export function hasNotifiedThisSession(): boolean {
+    return sessionStorage.getItem('autopcr_notified_once') === '1';
+}
+
+export function markNotifiedThisSession(): void {
+    sessionStorage.setItem('autopcr_notified_once', '1');
+}

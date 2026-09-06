@@ -792,15 +792,12 @@ export function AccountInfo({
                 </Flex>
             </Card.Header>
 
-            {/* 仅灰底窗体本身不进详情；Body 上下/左右一丝空白仍进详情 */}
+            {/* 整卡任意位置点击都进详情（含运行状态区） */}
             <Card.Body px={4} py={2} title="进入详细设置" cursor="pointer">
                 <Box
                     bg="bg.subtle"
                     p={2}
                     borderRadius="lg"
-                    cursor="default"
-                    title="运行状态"
-                    onClick={(e) => e.stopPropagation()}
                 >
                     <Flex justify="space-between" align="center" mb={1} gap={2}>
                         <Text fontSize="xs" color="fg.muted">

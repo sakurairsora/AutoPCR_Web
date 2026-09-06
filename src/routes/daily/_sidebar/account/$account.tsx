@@ -231,7 +231,7 @@ function AccountComponent() {
                             variant={isCurrentTabFavOnly ? 'solid' : 'ghost'}
                             colorPalette={isCurrentTabFavOnly ? 'yellow' : 'gray'}
                             onClick={handleToggleCurrentFavOnly}
-                            minW="7.5em"
+                            minW="5.5em"
                             type="button"
                         >
                             {isCurrentTabFavOnly ? (

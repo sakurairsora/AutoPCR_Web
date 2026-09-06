@@ -6,6 +6,7 @@ import {
     Flex,
     HStack,
     Input,
+    Popover,
     SimpleGrid,
     Stack,
     Table,
@@ -16,6 +17,7 @@ import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, deleteAccount, getUserInfo, putUserInfo } from '@api/Account';
 import { delAccount, postAccount, postAccountAreaSingle, postAccountImport } from '@api/Account';
+import { API } from '@api/APIUtils';
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { ResultInfo } from '@interfaces/UserInfo';
@@ -41,7 +43,8 @@ import { AccountInfo } from './AccountCard';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, hasNotifiedThisSession, markNotifiedThisSession } from './accountShared';
+import type { NotifyPrefs } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -53,6 +56,15 @@ function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, self
     }
     return set;
 }
+
+/** 周期通知的可静音对象：与日常分模块结果里的模块 key 对应 */
+const NOTIFY_CANDIDATES: { key: string; label: string }[] = [
+    { key: 'special_underground', label: '特别地下城' },
+    { key: 'abyss_frontier', label: '深渊讨伐战' },
+    { key: 'abyss_boss', label: '深渊boss战' },
+    { key: 'very_hard_hurdle', label: '扫荡活动h本' },
+    { key: 'luna_tower', label: '露娜塔回廊扫荡' },
+];
 
 export function DashBoard() {
     const [userInfo, setUserInfo] = useState<UserInfoResponse>();
@@ -72,6 +84,8 @@ export function DashBoard() {
     const [batchAccounts, setBatchAccounts] = useState<string[]>(() => loadBatch());
     // 「弹结果」：功能按钮执行完自动弹出结果汇总窗
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
+    // 周期通知：日常例行拉取各账号分模块结果，出警报（错误/中止）弹系统通知（整个会话只弹一次）
+    const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(() => loadNotifyPrefs());
     // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
     const busyRef = useRef(busyAccounts);
@@ -97,6 +111,61 @@ export function DashBoard() {
     useEffect(() => {
         localStorage.setItem('autopcr_popupResult', popupResult ? 'true' : 'false');
     }, [popupResult]);
+
+    useEffect(() => {
+        saveNotifyPrefs(notifyPrefs);
+    }, [notifyPrefs]);
+
+    // 周期通知轮询：60 秒一轮，全部账号静默拉取分模块日常结果；任何账号出警报（错误/中止）
+    // 且该模块未被静音 → 弹一次系统通知（整个浏览器会话只弹一次，需先授权）
+    useEffect(() => {
+        if (!notifyPrefs.enabled) return;
+        let cancelled = false;
+        const tick = async () => {
+            try {
+                const accounts = (await getUserInfo()).accounts ?? [];
+                if (cancelled) return;
+                for (const acc of accounts) {
+                    if (cancelled) return;
+                    try {
+                        const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${acc.name}/daily_result?text=true`);
+                        if (cancelled) return;
+                        const modules = res?.data?.result ?? {};
+                        const alarm = Object.entries(modules).find(([, m]) => m?.status === '错误' || m?.status === '中止');
+                        if (alarm && !hasNotifiedThisSession()) {
+                            // 模块 key 与中文名一起参与静音匹配（包含即命中，后端命名差异不影响）
+                            const hay = `${alarm[0]} ${alarm[1]?.name ?? ''}`;
+                            if (!notifyPrefs.muted.some((label) => hay.includes(label))) {
+                                markNotifiedThisSession();
+                                const accName = getDisplayName(acc.name);
+                                const body = `${accName}：${alarm[1]?.name || alarm[0]} 状态「${alarm[1]?.status}」`;
+                                try {
+                                    if (Notification.permission === 'granted') {
+                                        new Notification('AutoPCR 日常警报', { body });
+                                    } else {
+                                        toaster.create({ type: 'warning', title: '日常警报（浏览器通知未授权）', description: body });
+                                    }
+                                } catch {
+                                    toaster.create({ type: 'warning', title: '日常警报', description: body });
+                                }
+                            }
+                        }
+                    } catch {
+                        // 单个账号拉取失败不打断整轮
+                    }
+                }
+            } catch {
+                // 整轮失败静默
+            }
+        };
+        void tick();
+        const timer = window.setInterval(tick, 60_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [notifyPrefs.enabled, notifyPrefs.muted]);
 
     // 批次名单随账号列表自动剔除失效项
     useEffect(() => {
@@ -475,7 +544,7 @@ export function DashBoard() {
                     </Box>
                     <Button
                         size="sm"
-                        px={textFitPadding('设置默认账号')}
+                        px={textFitPadding('设默认号')}
                         colorPalette="purple"
                         variant={selectedInBatch ? 'solid' : 'ghost'}
                         borderWidth="1px"
@@ -483,7 +552,7 @@ export function DashBoard() {
                         onClick={handleToggleBatchForSelected}
                         title="点选账号可设置默认账号，可决定哪些账号默认使用主页快捷动作。"
                     >
-                        <FiStar /> 设置默认账号
+                        <FiStar /> 设默认号
                     </Button>
                     <Button
                         size="sm"
@@ -499,7 +568,7 @@ export function DashBoard() {
                     </Button>
                 </HStack>
 
-                <Flex flex={1} minW={0} wrap="wrap" alignContent="flex-start" justify="flex-start" gap={1}>
+                <Flex flex={1} minW={0} wrap="wrap" alignContent="flex-start" justify="flex-start" gap={2}>
                     <Button
                         size="sm"
                         flexShrink={0}
@@ -525,10 +594,7 @@ export function DashBoard() {
                             {btn.name}
                         </Button>
                     ))}
-                </Flex>
-
-                <HStack gap={2}>
-                    <Box borderWidth="1px" borderColor="currentColor" borderRadius="md" px={2} h="2rem" display="flex" alignItems="center" flexShrink={0}>
+                    <Box borderWidth="1px" borderColor="currentColor" borderRadius="md" px={2} h="2rem" display="flex" alignItems="center" flexShrink={0} ml="auto">
                         <Checkbox
                             checked={popupResult}
                             onCheckedChange={(details) => setPopupResult(!!details.checked)}
@@ -538,6 +604,61 @@ export function DashBoard() {
                         >
                             弹结果
                         </Checkbox>
+                    </Box>
+                </Flex>
+
+                <HStack gap={2}>
+                    <Box borderWidth="1px" borderColor="currentColor" borderRadius="md" px={2} h="2rem" display="flex" alignItems="center" flexShrink={0}>
+                        <Checkbox
+                            checked={notifyPrefs.enabled}
+                            onCheckedChange={async (details) => {
+                                const next = !!details.checked;
+                                if (next && 'Notification' in window && Notification.permission === 'default') {
+                                    try {
+                                        await Notification.requestPermission();
+                                    } catch {
+                                        // 用户拒绝或浏览器不支持时仍可开启，未授权期间用站内提示
+                                    }
+                                }
+                                setNotifyPrefs((prev) => ({ ...prev, enabled: next }));
+                            }}
+                            colorPalette="orange"
+                            size="md"
+                            title="让周期性任务，出警报（非跳过）时，弹出系统通知。多个号通知只出现一次。"
+                        >
+                            周期通知
+                        </Checkbox>
+                        <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>
+                            <Popover.Trigger asChild>
+                                <IconButton aria-label="配置不通知的模块" size="2xs" variant="ghost" colorPalette="orange" minW="1.25rem" h="1.25rem">
+                                    <FiPlus />
+                                </IconButton>
+                            </Popover.Trigger>
+                            <Popover.Content width="auto" minW="200px">
+                                <Popover.Body p={3}>
+                                    <Text fontSize="xs" color="fg.muted" mb={2}>勾选 = 该模块出警报时不弹系统通知</Text>
+                                    <Stack gap={2}>
+                                        {NOTIFY_CANDIDATES.map((c) => (
+                                            <Checkbox
+                                                key={c.key}
+                                                checked={notifyPrefs.muted.includes(c.label)}
+                                                onCheckedChange={(details) => {
+                                                    const mute = !!details.checked;
+                                                    setNotifyPrefs((prev) => ({
+                                                        ...prev,
+                                                        muted: mute ? [...prev.muted, c.label] : prev.muted.filter((k) => k !== c.label),
+                                                    }));
+                                                }}
+                                                colorPalette="orange"
+                                                size="md"
+                                            >
+                                                {c.label}
+                                            </Checkbox>
+                                        ))}
+                                    </Stack>
+                                </Popover.Body>
+                            </Popover.Content>
+                        </Popover.Root>
                     </Box>
                     <Box bg="bg.subtle" borderRadius="md" display="flex">
                         <Tooltip content="表格视图" openDelay={0} closeDelay={0}>
