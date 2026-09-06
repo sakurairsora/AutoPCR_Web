@@ -175,6 +175,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
                                             </option>
                                         ))}
                                     </NativeSelect.Field>
+                                    <NativeSelect.Indicator />
                                 </NativeSelect.Root>
                             </Field>
                             

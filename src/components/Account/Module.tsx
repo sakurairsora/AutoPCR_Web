@@ -27,6 +27,34 @@ interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
 }
 
 export default function Module({ alias, areaKey, areaName, config, info, isOpen, onOpen, onClose, onConfigUpdate, ...rest }: ModuleProps) {
+
+    /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚 */
+    const handleBulkSubStatus = async (value: number): Promise<void> => {
+        const keys = [
+            'ex_equip_rainbow_enchance_sub_status_1',
+            'ex_equip_rainbow_enchance_sub_status_2',
+            'ex_equip_rainbow_enchance_sub_status_3',
+            'ex_equip_rainbow_enchance_sub_status_4',
+        ];
+        const previous: Record<string, ConfigValue> = {};
+        const next: Record<string, ConfigValue> = {};
+        for (const k of keys) {
+            previous[k] = config[k];
+            next[k] = value;
+        }
+        for (const k of keys) onConfigUpdate?.(k, next[k]);
+        try {
+            const res = await enqueueConfigSave(alias, () => putAccountConfigs(alias, next));
+            toaster.create({ type: 'success', title: '保存成功', description: res });
+        } catch (err) {
+            for (const k of keys) onConfigUpdate?.(k, previous[k]);
+            toaster.create({
+                type: 'error',
+                title: '保存失败',
+                description: await getErrorDescription(err as AxiosError),
+            });
+        }
+    };
     const { open: isExpanded, onToggle: onToggleExpand } = useDisclosure({ defaultOpen: false });
     const dangerConfirm = useDisclosure();
     const isDangerous = areaName === '危险';
@@ -289,6 +317,26 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                                             />
                                         ))
                                     }
+                                    {info?.key === 'ex_equip_rainbow_enchance' && (
+                                        <Flex gap={2} wrap="wrap">
+                                            {([
+                                                { label: '全部物攻', value: 2 },
+                                                { label: '全部魔攻', value: 4 },
+                                                { label: '全部物贯', value: 12 },
+                                                { label: '全部法贯', value: 13 },
+                                            ] as const).map((opt) => (
+                                                <Button
+                                                    key={opt.label}
+                                                    size="xs"
+                                                    variant="outline"
+                                                    colorPalette="blue"
+                                                    onClick={() => void handleBulkSubStatus(opt.value)}
+                                                >
+                                                    {opt.label}
+                                                </Button>
+                                            ))}
+                                        </Flex>
+                                    )}
                                 </Stack>
                             </Box>
                         }

@@ -368,6 +368,7 @@ function ConfigSingleSelect({ alias, value, info, onConfigUpdate }: ConfigProps)
                         </option>
                     ))}
                 </NativeSelect.Field>
+                <NativeSelect.Indicator />
             </NativeSelect.Root>
         </InputGroup>
     );
