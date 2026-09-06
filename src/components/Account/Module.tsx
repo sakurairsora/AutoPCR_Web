@@ -1,5 +1,5 @@
 import { Box, Button, Card, Flex, HStack, Heading, Separator, Stack, Tag, useDisclosure } from '@chakra-ui/react'
-import { useRef } from 'react'
+import { Fragment, useRef } from 'react'
 import { ConfigValue, ModuleInfo } from '@interfaces/Module';
 import { FiChevronDown, FiCopy, FiStar } from 'react-icons/fi';
 import { getAccountAreaSingleResultList, postAccountAreaSingle, putAccountConfig, getAccountConfig, putAccountConfigs } from '@api/Account';
@@ -308,35 +308,36 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                                     <Heading size='sm' color="fg.subtle">设置项</Heading>
                                     {
                                         info?.config_order.map((key) => (
-                                            <Config
-                                                key={key}
-                                                alias={alias}
-                                                value={config[key]}
-                                                info={info.config[key]}
-                                                onConfigUpdate={onConfigUpdate}
-                                            />
+                                            <Fragment key={key}>
+                                                <Config
+                                                    alias={alias}
+                                                    value={config[key]}
+                                                    info={info.config[key]}
+                                                    onConfigUpdate={onConfigUpdate}
+                                                />
+                                                {key === 'ex_equip_rainbow_enchance_sub_status_4' && (
+                                                    <Flex gap={2} wrap="wrap">
+                                                        {([
+                                                            { label: '全部物攻', value: 2 },
+                                                            { label: '全部魔攻', value: 4 },
+                                                            { label: '全部物贯', value: 12 },
+                                                            { label: '全部法贯', value: 13 },
+                                                        ] as const).map((opt) => (
+                                                            <Button
+                                                                key={opt.label}
+                                                                size="xs"
+                                                                variant="outline"
+                                                                colorPalette="blue"
+                                                                onClick={() => void handleBulkSubStatus(opt.value)}
+                                                            >
+                                                                {opt.label}
+                                                            </Button>
+                                                        ))}
+                                                    </Flex>
+                                                )}
+                                            </Fragment>
                                         ))
                                     }
-                                    {info?.key === 'ex_equip_rainbow_enchance' && (
-                                        <Flex gap={2} wrap="wrap">
-                                            {([
-                                                { label: '全部物攻', value: 2 },
-                                                { label: '全部魔攻', value: 4 },
-                                                { label: '全部物贯', value: 12 },
-                                                { label: '全部法贯', value: 13 },
-                                            ] as const).map((opt) => (
-                                                <Button
-                                                    key={opt.label}
-                                                    size="xs"
-                                                    variant="outline"
-                                                    colorPalette="blue"
-                                                    onClick={() => void handleBulkSubStatus(opt.value)}
-                                                >
-                                                    {opt.label}
-                                                </Button>
-                                            ))}
-                                        </Flex>
-                                    )}
                                 </Stack>
                             </Box>
                         }
