@@ -23,35 +23,9 @@ export function loadPopupMaster(): boolean {
     return localStorage.getItem(POPUP_MASTER_KEY) !== 'false';
 }
 
-/** 自动批次名单（多"默认账号"），带版本号存本地 */
-const BATCH_KEY = 'autopcr_batch_v1';
-
-export function loadBatch(): string[] {
-    try {
-        const raw = localStorage.getItem(BATCH_KEY);
-        const parsed: unknown = raw ? JSON.parse(raw) : null;
-        const list = (parsed as { accounts?: unknown } | null)?.accounts;
-        if (Array.isArray(list)) {
-            return list.filter((x): x is string => typeof x === 'string');
-        }
-    } catch {
-        return [];
-    }
-    return [];
-}
-
-export function saveBatch(accounts: string[]): void {
-    try {
-        localStorage.setItem(BATCH_KEY, JSON.stringify({ version: 1, accounts }));
-    } catch {
-        // 本地存储不可用则仅本次会话有效
-    }
-}
-
-/** 周期通知：开关 + 静音名单（模块 key），存本地 */
+/** 周期通知：开关 + 静音名单（模块中文名），存本地 */
 export interface NotifyPrefs {
     enabled: boolean;
-    /** 静音的模块 key：这些模块出警报也不弹系统通知 */
     muted: string[];
 }
 
@@ -78,6 +52,27 @@ export function saveNotifyPrefs(prefs: NotifyPrefs): void {
     }
 }
 
+/** 账号日常执行完成事件（仅开启周期通知时派发），载荷=账号名 */
+export function emitDailyFinished(alias: string): void {
+    try {
+        window.dispatchEvent(new CustomEvent('autopcr_daily_finished', { detail: alias }));
+    } catch {
+        // 环境不支持 CustomEvent 时忽略
+    }
+}
+
+/** 订阅账号日常执行完成事件；返回取消订阅函数 */
+export function onDailyFinished(cb: (alias: string) => void): () => void {
+    const listener = (e: Event): void => {
+        const detail = (e as CustomEvent).detail as string | undefined;
+        if (detail) cb(detail);
+    };
+    window.addEventListener('autopcr_daily_finished', listener);
+    return () => {
+        window.removeEventListener('autopcr_daily_finished', listener);
+    };
+}
+
 /** 本次浏览器会话是否已弹过周期通知（多个号只弹一次） */
 export function hasNotifiedThisSession(): boolean {
     return sessionStorage.getItem('autopcr_notified_once') === '1';
@@ -85,4 +80,37 @@ export function hasNotifiedThisSession(): boolean {
 
 export function markNotifiedThisSession(): void {
     sessionStorage.setItem('autopcr_notified_once', '1');
+}
+
+/** 文字越多两侧越窄；3 个字以内保持默认内边距（图标/短按钮保持好点） */
+export function textFitPadding(label: string): string | undefined {
+    const len = Array.from(label).length;
+    if (len <= 3) return undefined;
+    if (len <= 5) return '0.5rem';
+    return '0.25rem';
+}
+
+/** 自动批次名单（多"默认账号"），带版本号存本地 */
+const BATCH_KEY = 'autopcr_batch_v1';
+
+export function loadBatch(): string[] {
+    try {
+        const raw = localStorage.getItem(BATCH_KEY);
+        const parsed: unknown = raw ? JSON.parse(raw) : null;
+        const list = (parsed as { accounts?: unknown } | null)?.accounts;
+        if (Array.isArray(list)) {
+            return list.filter((x): x is string => typeof x === 'string');
+        }
+    } catch {
+        return [];
+    }
+    return [];
+}
+
+export function saveBatch(accounts: string[]): void {
+    try {
+        localStorage.setItem(BATCH_KEY, JSON.stringify({ version: 1, accounts }));
+    } catch {
+        // 本地存储不可用则仅本次会话有效
+    }
 }

@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -129,6 +129,7 @@ function AccountComponent() {
 
         try {
             const res = await postAccountAreaDaily(a);
+            void emitDailyFinished(a);
             const st =
                 (res as any)?.daily_clean_time?.status ||
                 (res as any)?.status ||
@@ -231,7 +232,7 @@ function AccountComponent() {
                             variant={isCurrentTabFavOnly ? 'solid' : 'ghost'}
                             colorPalette={isCurrentTabFavOnly ? 'yellow' : 'gray'}
                             onClick={handleToggleCurrentFavOnly}
-                            minW="5.5em"
+                            px={textFitPadding(isCurrentTabFavOnly ? '显示全部' : '只显示收藏')}
                             type="button"
                         >
                             {isCurrentTabFavOnly ? (
@@ -246,10 +247,12 @@ function AccountComponent() {
                             colorPalette="orange"
                             onClick={() => void handleCleanDaily()}
                             loading={cleanLoading}
+                            px={textFitPadding('清理全部日常')}
                             type="button"
                         >
-                            <FiTarget /> 立刻清理
+                            <FiTarget /> 清理全部日常
                         </Button>
+                        <Box w="1px" h="1.25rem" bg="border.subtle" mx={1} alignSelf="center" />
                         <Checkbox
                             checked={popupOn}
                             onCheckedChange={(details) => {

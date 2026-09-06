@@ -15,7 +15,7 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName } from './accountShared';
+import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished } from './accountShared';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
     account: AccountInfoInterface;
@@ -103,6 +103,7 @@ export function AccountInfo({
         try {
             const res = await postAccountAreaDaily(alias);
             updateAccountInfo(res);
+            void emitDailyFinished(alias);
 
             const st = res?.daily_clean_time?.status || '';
             if (st === '错误') {

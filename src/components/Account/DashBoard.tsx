@@ -43,7 +43,7 @@ import { AccountInfo } from './AccountCard';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, hasNotifiedThisSession, markNotifiedThisSession } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, loadNotifyPrefs, saveNotifyPrefs, hasNotifiedThisSession, markNotifiedThisSession, onDailyFinished } from './accountShared';
 import type { NotifyPrefs } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
@@ -116,54 +116,44 @@ export function DashBoard() {
         saveNotifyPrefs(notifyPrefs);
     }, [notifyPrefs]);
 
-    // 周期通知轮询：60 秒一轮，全部账号静默拉取分模块日常结果；任何账号出警报（错误/中止）
-    // 且该模块未被静音 → 弹一次系统通知（整个浏览器会话只弹一次，需先授权）
+    // 周期通知：被动监听「某账号日常执行完成」事件 → 若此前无警报，才去筛查该账号的分模块结果；
+    // 出现警报（错误/中止）且未被静音 → 弹一次系统通知（整个会话只弹一次，需先授权）。
+    // 已是警报状态则静默，直到状态恢复正常后再次出警才会再弹。
+    const alarmSeenRef = useRef(false);
     useEffect(() => {
         if (!notifyPrefs.enabled) return;
-        let cancelled = false;
-        const tick = async () => {
+        const off = onDailyFinished(async (alias: string) => {
+            if (hasNotifiedThisSession()) return;
             try {
-                const accounts = (await getUserInfo()).accounts ?? [];
-                if (cancelled) return;
-                for (const acc of accounts) {
-                    if (cancelled) return;
-                    try {
-                        const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${acc.name}/daily_result?text=true`);
-                        if (cancelled) return;
-                        const modules = res?.data?.result ?? {};
-                        const alarm = Object.entries(modules).find(([, m]) => m?.status === '错误' || m?.status === '中止');
-                        if (alarm && !hasNotifiedThisSession()) {
-                            // 模块 key 与中文名一起参与静音匹配（包含即命中，后端命名差异不影响）
-                            const hay = `${alarm[0]} ${alarm[1]?.name ?? ''}`;
-                            if (!notifyPrefs.muted.some((label) => hay.includes(label))) {
-                                markNotifiedThisSession();
-                                const accName = getDisplayName(acc.name);
-                                const body = `${accName}：${alarm[1]?.name || alarm[0]} 状态「${alarm[1]?.status}」`;
-                                try {
-                                    if (Notification.permission === 'granted') {
-                                        new Notification('AutoPCR 日常警报', { body });
-                                    } else {
-                                        toaster.create({ type: 'warning', title: '日常警报（浏览器通知未授权）', description: body });
-                                    }
-                                } catch {
-                                    toaster.create({ type: 'warning', title: '日常警报', description: body });
-                                }
-                            }
-                        }
-                    } catch {
-                        // 单个账号拉取失败不打断整轮
+                const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(`/account/${alias}/daily_result?text=true`);
+                const modules = res?.data?.result ?? {};
+                const alarm = Object.entries(modules).find(([, m]) => m?.status === '错误' || m?.status === '中止');
+                if (!alarm) {
+                    if (alarmSeenRef.current) alarmSeenRef.current = false; // 状态恢复正常，重新武装
+                    return;
+                }
+                if (alarmSeenRef.current) return; // 之前已是警报：静默
+                // 模块 key 与中文名一起参与静音匹配（包含即命中）
+                const hay = `${alarm[0]} ${alarm[1]?.name ?? ''}`;
+                if (notifyPrefs.muted.some((label) => hay.includes(label))) return;
+                alarmSeenRef.current = true;
+                markNotifiedThisSession();
+                const accName = getDisplayName(alias);
+                const body = `${accName}：${alarm[1]?.name || alarm[0]} 状态「${alarm[1]?.status}」`;
+                try {
+                    if (Notification.permission === 'granted') {
+                        new Notification('AutoPCR 日常警报', { body });
+                    } else {
+                        toaster.create({ type: 'warning', title: '日常警报（浏览器通知未授权）', description: body });
                     }
+                } catch {
+                    toaster.create({ type: 'warning', title: '日常警报', description: body });
                 }
             } catch {
-                // 整轮失败静默
+                // 拉取失败静默
             }
-        };
-        void tick();
-        const timer = window.setInterval(tick, 60_000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(timer);
-        };
+        });
+        return off;
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [notifyPrefs.enabled, notifyPrefs.muted]);
 
@@ -568,7 +558,7 @@ export function DashBoard() {
                     </Button>
                 </HStack>
 
-                <Flex flex={1} minW={0} wrap="wrap" alignContent="flex-start" justify="flex-start" gap={2}>
+                <Flex flex={1} minW={0} wrap="wrap" alignContent="flex-start" justify="flex-start" alignItems="center" gap={2}>
                     <Button
                         size="sm"
                         flexShrink={0}
@@ -605,61 +595,74 @@ export function DashBoard() {
                             弹结果
                         </Checkbox>
                     </Box>
+                    <Box w="1px" h="1.25rem" bg="border.subtle" flexShrink={0} alignSelf="center" />
+                    <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>
+                        <Popover.Trigger asChild>
+                            <Box
+                                borderWidth="1px"
+                                borderColor="currentColor"
+                                borderRadius="md"
+                                px={2}
+                                h="2rem"
+                                display="flex"
+                                alignItems="center"
+                                gap={1}
+                                flexShrink={0}
+                                cursor="pointer"
+                                title="让周期性任务，出警报（非跳过）时，弹出系统通知。多个号通知只出现一次。"
+                            >
+                                <Checkbox
+                                    checked={notifyPrefs.enabled}
+                                    onCheckedChange={async (details) => {
+                                        const next = !!details.checked;
+                                        if (next && 'Notification' in window && Notification.permission === 'default') {
+                                            try {
+                                                await Notification.requestPermission();
+                                            } catch {
+                                                // 用户拒绝或浏览器不支持时仍可开启，未授权期间用站内提示
+                                            }
+                                        }
+                                        setNotifyPrefs((prev) => ({ ...prev, enabled: next }));
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    colorPalette="orange"
+                                    size="md"
+                                >
+                                    周期通知
+                                </Checkbox>
+                                <FiPlus />
+                            </Box>
+                        </Popover.Trigger>
+                        <Popover.Content width="auto" minW="200px">
+                            <Popover.Body p={3}>
+                                <Stack gap={2}>
+                                    {NOTIFY_CANDIDATES.map((c) => (
+                                        <Checkbox
+                                            key={c.key}
+                                            defaultChecked={!notifyPrefs.muted.includes(c.label)}
+                                            checked={!notifyPrefs.muted.includes(c.label)}
+                                            onCheckedChange={(details) => {
+                                                const notifyOn = !!details.checked;
+                                                setNotifyPrefs((prev) => ({
+                                                    ...prev,
+                                                    muted: notifyOn
+                                                        ? prev.muted.filter((k) => k !== c.label)
+                                                        : [...prev.muted, c.label],
+                                                }));
+                                            }}
+                                            colorPalette="orange"
+                                            size="md"
+                                        >
+                                            {c.label}
+                                        </Checkbox>
+                                    ))}
+                                </Stack>
+                            </Popover.Body>
+                        </Popover.Content>
+                    </Popover.Root>
                 </Flex>
 
                 <HStack gap={2}>
-                    <Box borderWidth="1px" borderColor="currentColor" borderRadius="md" px={2} h="2rem" display="flex" alignItems="center" flexShrink={0}>
-                        <Checkbox
-                            checked={notifyPrefs.enabled}
-                            onCheckedChange={async (details) => {
-                                const next = !!details.checked;
-                                if (next && 'Notification' in window && Notification.permission === 'default') {
-                                    try {
-                                        await Notification.requestPermission();
-                                    } catch {
-                                        // 用户拒绝或浏览器不支持时仍可开启，未授权期间用站内提示
-                                    }
-                                }
-                                setNotifyPrefs((prev) => ({ ...prev, enabled: next }));
-                            }}
-                            colorPalette="orange"
-                            size="md"
-                            title="让周期性任务，出警报（非跳过）时，弹出系统通知。多个号通知只出现一次。"
-                        >
-                            周期通知
-                        </Checkbox>
-                        <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>
-                            <Popover.Trigger asChild>
-                                <IconButton aria-label="配置不通知的模块" size="2xs" variant="ghost" colorPalette="orange" minW="1.25rem" h="1.25rem">
-                                    <FiPlus />
-                                </IconButton>
-                            </Popover.Trigger>
-                            <Popover.Content width="auto" minW="200px">
-                                <Popover.Body p={3}>
-                                    <Text fontSize="xs" color="fg.muted" mb={2}>勾选 = 该模块出警报时不弹系统通知</Text>
-                                    <Stack gap={2}>
-                                        {NOTIFY_CANDIDATES.map((c) => (
-                                            <Checkbox
-                                                key={c.key}
-                                                checked={notifyPrefs.muted.includes(c.label)}
-                                                onCheckedChange={(details) => {
-                                                    const mute = !!details.checked;
-                                                    setNotifyPrefs((prev) => ({
-                                                        ...prev,
-                                                        muted: mute ? [...prev.muted, c.label] : prev.muted.filter((k) => k !== c.label),
-                                                    }));
-                                                }}
-                                                colorPalette="orange"
-                                                size="md"
-                                            >
-                                                {c.label}
-                                            </Checkbox>
-                                        ))}
-                                    </Stack>
-                                </Popover.Body>
-                            </Popover.Content>
-                        </Popover.Root>
-                    </Box>
                     <Box bg="bg.subtle" borderRadius="md" display="flex">
                         <Tooltip content="表格视图" openDelay={0} closeDelay={0}>
                             <IconButton
