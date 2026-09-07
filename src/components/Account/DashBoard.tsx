@@ -6,12 +6,14 @@ import {
     Flex,
     HStack,
     Input,
+    SimpleGrid,
     Stack,
+    Table,
     Text,
 } from '@chakra-ui/react';
 import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
-import { Skeleton } from '../../components/ui/skeleton';
+import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, deleteAccount, getUserInfo, putUserInfo } from '@api/Account';
 import { delAccount, postAccount, postAccountAreaSingle, postAccountImport } from '@api/Account';
 import { useEffect, useState } from 'react';
@@ -31,11 +33,12 @@ import { toaster } from '../../components/ui/toaster';
 import { useCountHook } from '../count';
 import { useDisclosure } from '@chakra-ui/react';
 import QuickActionPicker from './QuickActionPicker';
+import ConfigSyncModal from './ConfigSyncModal';
 import ResultSummaryModal, { ResultSummaryRow } from './ResultSummaryModal';
 import ResultInfoModal from './ResultInfoModal';
 import { loadQuickActions, saveQuickActions, QuickActionItem } from './quickActions';
-import AccountListSection from './AccountListSection';
-import NotifySettings from './NotifySettings';
+import { AccountInfo } from './AccountCard';
+import { NotifySettings } from './accountShared';
 
 import { getErrorDescription } from './Config';
 
@@ -296,12 +299,8 @@ export function DashBoard() {
         }
         NiceModal.show(QuickActionPicker, { alias: refAlias, current: quickActions }).then((items) => {
             if (!Array.isArray(items)) return;
-            const knownKeys = new Set(items.map((i) => i.key));
-            const removedCount = quickActions.filter((q) => !knownKeys.has(q.key)).length;
+            // 不弹提示：勾/取消勾是用户主动操作，结果按钮直接可见
             setQuickActions(items as QuickActionItem[]);
-            if (removedCount > 0) {
-                toaster.create({ type: 'info', title: `已更新自定义按钮（移除 ${removedCount} 个）` });
-            }
         });
     };
 
@@ -655,22 +654,122 @@ export function DashBoard() {
                 {' '}
             </Alert>
 
-            <AccountListSection
-                userInfo={userInfo}
-                isTableView={isTableView}
-                selectedAccounts={selectedAccounts}
-                batchAccounts={batchAccounts}
-                busyAccounts={busyAccounts}
-                allSelected={allSelected}
-                toggleSelectAll={toggleSelectAll}
-                toggleSelectAccount={toggleSelectAccount}
-                onRefresh={freshAccountInfo.onToggle}
-                increaseCount={increaseCount}
-                decreaseCount={decreaseCount}
-                updateAccountInfo={updateAccountInfo}
-                setAccountBusy={setAccountBusy}
-                occupiedNamesFactory={occupiedNamesFactory}
-            />
+            {isTableView ? (
+                <Box borderRadius="xl">
+                    <Table.Root variant="outline" colorPalette="blue" size="sm" bg="bg.panel" borderRadius="xl" boxShadow="sm" ml="0" mr="auto">
+                        <Table.Header position="sticky" top={0} bg="bg.subtle" zIndex={1} boxShadow="sm">
+                            <Table.Row>
+                                <Table.ColumnHeader px={0} fontSize="md" py={4} fontWeight="bold" width="5%" textAlign="center">
+                                    <Checkbox
+                                        checked={
+                                            (selectedAccounts.length > 0 && selectedAccounts.length < (userInfo?.accounts?.length ?? 0))
+                                                ? "indeterminate"
+                                                : (selectedAccounts.length > 0 && selectedAccounts.length === userInfo?.accounts?.length)
+                                        }
+                                        onCheckedChange={toggleSelectAll}
+                                        colorPalette="blue"
+                                        size="md"
+                                        css={{
+                                            '& [data-part=control], & .chakra-checkbox__control': {
+                                                borderRadius: '9999px',
+                                                width: '1.25rem',
+                                                height: '1.25rem',
+                                            },
+                                        }}
+                                    />
+                                </Table.ColumnHeader>
+                                <Table.ColumnHeader px={0} fontSize="md" py={4} fontWeight="bold" width="25%" minWidth="80px">
+                                    账号
+                                </Table.ColumnHeader>
+                                <Table.ColumnHeader px={3} fontSize="md" py={4} fontWeight="bold" width="30%">
+                                    最近记录
+                                </Table.ColumnHeader>
+                                <Table.ColumnHeader px={3} fontSize="md" py={4} fontWeight="bold" width="30%">
+                                    操作
+                                </Table.ColumnHeader>
+                            </Table.Row>
+                        </Table.Header>
+                        <Table.Body>
+                            {!userInfo ? (
+                                Array.from({ length: 5 }).map((_, i) => (
+                                    <Table.Row key={i} bg="transparent">
+                                        <Table.Cell px={3} py={2}><Skeleton height="20px" width="20px" /></Table.Cell>
+                                        <Table.Cell px={0} py={2}><Skeleton height="20px" width="80%" /></Table.Cell>
+                                        <Table.Cell px={3} py={2}><Skeleton height="20px" width="60%" /></Table.Cell>
+                                        <Table.Cell px={3} py={2}><Skeleton height="32px" width="100%" /></Table.Cell>
+                                    </Table.Row>
+                                ))
+                            ) : (
+                                userInfo?.accounts?.map((account) => (
+                                    <AccountInfo
+                                        key={account.name}
+                                        account={account}
+                                        onToggle={freshAccountInfo.onToggle}
+                                        increaseCount={increaseCount}
+                                        decreaseCount={decreaseCount}
+                                        updateAccountInfo={updateAccountInfo}
+                                        isTableView={isTableView}
+                                        isSelected={selectedAccounts.includes(account.name)}
+                                        onToggleSelect={() => toggleSelectAccount(account.name)}
+                                        batchAccounts={batchAccounts}
+                                        getOccupiedNames={occupiedNamesFactory}
+                                        isBusy={busyAccounts.has(account.name)}
+                                        onBusyChange={setAccountBusy}
+                                        onOpenSyncConfig={(a) => {
+                                            NiceModal.show(ConfigSyncModal, { sourceAccount: a });
+                                        }}
+                                    />
+                                ))
+                            )}
+                        </Table.Body>
+                    </Table.Root>
+                </Box>
+            ) : (
+                <Box p={1}>
+                    <Box mb={2}>
+                        <Checkbox
+                            checked={allSelected ? true : selectedAccounts.length > 0 ? 'indeterminate' : false}
+                            onCheckedChange={toggleSelectAll}
+                            colorPalette="blue"
+                            size="md"
+                        >
+                            全选账号
+                        </Checkbox>
+                    </Box>
+                    <SimpleGrid gap={4} templateColumns="repeat(auto-fill, minmax(280px, 1fr))">
+                        {!userInfo ? (
+                            Array.from({ length: 4 }).map((_, i) => (
+                                <Card.Root key={i} bg="bg.panel" borderRadius="2xl" shadow="sm">
+                                    <Card.Header><Skeleton height="24px" width="50%" /></Card.Header>
+                                    <Card.Body><SkeletonText noOfLines={3} gap={4} /></Card.Body>
+                                    <Card.Footer><Skeleton height="32px" width="100%" /></Card.Footer>
+                                </Card.Root>
+                            ))
+                        ) : (
+                            userInfo?.accounts?.map((account) => (
+                                <AccountInfo
+                                    key={account.name}
+                                    account={account}
+                                    onToggle={freshAccountInfo.onToggle}
+                                    increaseCount={increaseCount}
+                                    decreaseCount={decreaseCount}
+                                    updateAccountInfo={updateAccountInfo}
+                                    isTableView={isTableView}
+                                    isSelected={selectedAccounts.includes(account.name)}
+                                    onToggleSelect={() => toggleSelectAccount(account.name)}
+                                    batchAccounts={batchAccounts}
+                                    getOccupiedNames={occupiedNamesFactory}
+                                    isBusy={busyAccounts.has(account.name)}
+                                    onBusyChange={setAccountBusy}
+                                    onOpenSyncConfig={(a) => {
+                                        NiceModal.show(ConfigSyncModal, { sourceAccount: a });
+                                    }}
+                                />
+                            ))
+                        )}
+                    </SimpleGrid>
+                </Box>
+            )}
         </Stack>
     );
 }

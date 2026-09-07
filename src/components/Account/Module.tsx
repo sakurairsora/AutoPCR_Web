@@ -30,6 +30,9 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
     /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚（仅还原仍等于乐观值的键，避免覆盖用户手改） */
     const bulkBusyRef = useRef(false);
+    // 回滚判定要读“此刻”的配置：闭包里的 config 是 await 前的旧值，守卫会恒 false 导致回滚失效
+    const configRef = useRef(config);
+    configRef.current = config;
     const handleBulkSubStatus = async (value: number): Promise<void> => {
         if (bulkBusyRef.current) return; // 防连点：上一批还在队列里
         bulkBusyRef.current = true;
@@ -51,9 +54,9 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                 const res = await enqueueConfigSave(alias, () => putAccountConfigs(alias, next));
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             } catch (err) {
-                // 只还原当前值仍等于乐观写入值的键：排队期间用户手改过的键不动
+                // 只还原当前值仍等于乐观写入值的键：排队期间用户手改过的键不动（configRef=最新渲染值）
                 for (const k of keys) {
-                    if (config[k] === next[k]) onConfigUpdate?.(k, optimistic[k]);
+                    if (configRef.current[k] === next[k]) onConfigUpdate?.(k, optimistic[k]);
                 }
                 toaster.create({
                     type: 'error',

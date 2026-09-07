@@ -30,7 +30,7 @@ import { toaster } from '../../components/ui/toaster'
 import {useEffect} from 'react'
 import {useUserRole} from "@api/Account.ts";
 import RunningStatus from '../Account/RunningStatus';
-import NotifyWatcher from '../Account/notifyWatcher';
+import { NotifyWatcher } from '../Account/accountShared';
 
 interface NavItemProps extends FlexProps {
     icon?: IconType
