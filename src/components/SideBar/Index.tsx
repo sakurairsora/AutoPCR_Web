@@ -30,7 +30,7 @@ import { toaster } from '../../components/ui/toaster'
 import {useEffect} from 'react'
 import {useUserRole} from "@api/Account.ts";
 import RunningStatus from '../Account/RunningStatus';
-import { NotifyWatcher } from '../Account/accountShared';
+import { NotifyWatcher, resetNotifyWatcherState } from '../Account/accountShared';
 
 interface NavItemProps extends FlexProps {
     icon?: IconType
@@ -126,6 +126,7 @@ export default function Nav() {
     const handleLogout = async () => {
         try {
             const res = await postLogout();
+            resetNotifyWatcherState(); // 跨登录清理：下一个登录者不被旧警报记录吞通知
             toaster.create({ title: "登出成功", description: res, type: "success" });
             await navigate({ to: LoginRoute.to });
         } catch {

@@ -249,8 +249,9 @@ export function NotifySettings() {
 
 /** 每账号是否处于警报态（恢复后复位）——按账号隔离，互不吞警报 */
 const alarmSeenByAlias = new Map<string, boolean>();
-/** 同一账号拉取进行中则跳过，避免事件风暴下重复请求 */
+/** 同一账号拉取进行中则跳过，避免事件风暴下重复请求；期间再来事件记 trailing，完成后补查一次 */
 const notifyInflight = new Set<string>();
+const notifyTrailing = new Set<string>();
 
 /** 已知的可静音模块 key 集合 */
 const CANDIDATE_KEYS = new Set(NOTIFY_CANDIDATES.map((c) => c.key));
@@ -262,14 +263,16 @@ function alarmWorthNotifying(key: string, muted: string[]): boolean {
     return !wasNotifiedRecently(key);
 }
 
+/** 登出/删QQ 时清理跨登录的警报态：避免下一个登录者被上一个用户的警报记录吞掉通知 */
+export function resetNotifyWatcherState(): void {
+    alarmSeenByAlias.clear();
+    notifyInflight.clear();
+    notifyTrailing.clear();
+}
+
 export function NotifyWatcher(): null {
     useEffect(() => {
-        const off = onDailyFinished((alias: string) => {
-            // 偏好在事件到达时现读：改设置无需重挂监听，永无闭包陈旧
-            const prefs = loadNotifyPrefs();
-            if (!prefs.enabled) return;
-            if (notifyInflight.has(alias)) return;
-            notifyInflight.add(alias);
+        const check = (alias: string, prefsMuted: string[]) => {
             void (async () => {
                 try {
                     const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(
@@ -281,19 +284,19 @@ export function NotifyWatcher(): null {
                         alarmSeenByAlias.set(alias, false); // 该账号恢复正常：重新武装
                         return;
                     }
-                    if (alarmSeenByAlias.get(alias)) return; // 该账号此前已是警报：静默
-                    alarmSeenByAlias.set(alias, true);
-                    // 逐个筛查全部警报模块（find 逐项判断，第一个模块被抑制不挡后面的）：
+                    // 逐个筛查全部警报模块（find 逐项判断，第一个被抑制不挡后面的）：
                     // 已知模块（候选表内）静音按 key；未知模块不静音但参与月度去重
                     const chosen = alarms.find(
                         ([key]) => CANDIDATE_KEYS.has(key)
-                            ? alarmWorthNotifying(key, prefs.muted)
+                            ? alarmWorthNotifying(key, prefsMuted)
                             : !wasNotifiedRecently(key),
                     );
-                    if (!chosen) return; // 全部被抑制：不弹
+                    if (!chosen) return; // 全部被抑制：不弹，也不置警报态（被静音的旧警报不该吞掉后续新警报）
                     if (chosen[0] !== NOTIFY_NO_DEDUP_KEY) {
                         markNotifiedForClass(chosen[0]);
                     }
+                    // 只有真的弹了才置警报态：静音期不武装，新模块警报仍可弹出
+                    alarmSeenByAlias.set(alias, true);
                     const accName = getDisplayName(alias);
                     const body = `${accName}：${chosen[1]?.name || chosen[0]} 状态「${chosen[1]?.status}」`;
                     try {
@@ -309,8 +312,24 @@ export function NotifyWatcher(): null {
                     // 拉取失败静默：下次事件再来
                 } finally {
                     notifyInflight.delete(alias);
+                    // 拉取期间又来了事件：补查一次，新警报不用等下一次日常才被发现
+                    if (notifyTrailing.delete(alias)) {
+                        const prefs = loadNotifyPrefs();
+                        if (prefs.enabled) check(alias, prefs.muted);
+                    }
                 }
             })();
+        };
+        const off = onDailyFinished((alias: string) => {
+            // 偏好在事件到达时现读：改设置无需重挂监听，永无闭包陈旧
+            const prefs = loadNotifyPrefs();
+            if (!prefs.enabled) return;
+            if (notifyInflight.has(alias)) {
+                notifyTrailing.add(alias); // 正在拉取：标记补查而非丢弃
+                return;
+            }
+            notifyInflight.add(alias);
+            check(alias, prefs.muted);
         });
         return off;
     }, []);

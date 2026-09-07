@@ -169,7 +169,7 @@ export function AccountInfo({
     };
 
     const goDetail = () => {
-        void navigate({ to: `${DashBoardRoute.to || ''}${alias}` as any });
+        void navigate({ to: `${DashBoardRoute.to || ''}${encodeURIComponent(alias)}` as any });
     };
 
 

@@ -42,7 +42,7 @@ import { NotifySettings } from './accountShared';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem, resetNotifyWatcherState } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -265,7 +265,9 @@ export function DashBoard() {
             }),
         );
         const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
-        if (popupResult) {
+        // 单账号 + 该账号开了弹结果：只弹详情窗，不叠汇总窗
+        const singleDetail = free.length === 1 && loadPopupFlag(free[0]) && outcomes.get(free[0])?.ok && outcomes.get(free[0])?.res;
+        if (popupResult && !singleDetail) {
             const rows: ResultSummaryRow[] = free.map((name) => {
                 const o = outcomes.get(name);
                 return { alias: name, name: getDisplayName(name), status: o?.ok ? '成功' : '失败', detail: o?.ok ? undefined : o?.detail };
@@ -281,9 +283,9 @@ export function DashBoard() {
             });
         }
         // 仅对单账号执行且该账号开了"弹结果"标记的，直接弹该账号的功能结果窗
-        if (free.length === 1 && loadPopupFlag(free[0])) {
+        if (singleDetail) {
             const o = outcomes.get(free[0]);
-            if (o?.ok && o.res) {
+            if (o?.res) {
                 NiceModal.show(ResultInfoModal, { alias: free[0], title: btn.name, resultInfo: o.res }).catch(() => {
                     return;
                 });
@@ -315,10 +317,12 @@ export function DashBoard() {
     };
 
     const toggleSelectAll = () => {
-        if (selectedAccounts.length === userInfo?.accounts?.length) {
+        // 全选集合排除 BATCH_RUNNER 虚拟账号：勾进去会在批量执行时直打后端
+        const selectable = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
+        if (selectedAccounts.length === selectable.length) {
             setSelectedAccounts([]);
         } else {
-            setSelectedAccounts(userInfo?.accounts?.map((acc) => acc.name) ?? []);
+            setSelectedAccounts(selectable);
         }
     };
 
@@ -380,6 +384,7 @@ export function DashBoard() {
     const handleDeleteAccount = () => {
         deleteAccount()
             .then(async (res) => {
+                resetNotifyWatcherState(); // 跨登录清理：下一个登录者不被旧警报记录吞通知
                 toaster.create({ type: 'success', title: '删除QQ成功', description: res });
                 deleteQQConfirm.onToggle();
                 await navigate({ to: LoginRoute.to });
