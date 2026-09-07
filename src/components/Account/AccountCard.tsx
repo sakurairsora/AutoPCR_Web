@@ -1,5 +1,5 @@
 import { AccountInfo as AccountInfoInterface } from '@interfaces/UserInfo';
-import { Box, Card, Flex, HStack, Input, Spinner, Table, Tag, Text, useDisclosure } from '@chakra-ui/react';
+import { Box, Card, Flex, HStack, Input, Table, Text, useDisclosure } from '@chakra-ui/react';
 import { FiActivity, FiCheck, FiCopy, FiTarget, FiUpload, FiUserX, FiX } from 'react-icons/fi';
 import React, { ChangeEvent, useRef } from 'react';
 import { useEffect, useState } from 'react';
@@ -7,7 +7,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { Route as DashBoardRoute } from '@routes/daily/_sidebar/account/index';
 import Alert from '../alert';
 import { AxiosError } from 'axios';
-import { Checkbox } from '../../components/ui/checkbox';
 import { IconButton } from '../../components/ui/icon-button';
 import { Tooltip } from '../../components/ui/tooltip';
 import NiceModal from '@ebay/nice-modal-react';
@@ -16,6 +15,7 @@ import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
 import { getErrorDescription } from './Config';
 import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, favKey } from './accountShared';
+import { RoundCheckbox, AccountTags, StatusTag } from './AccountCardParts';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
     account: AccountInfoInterface;
@@ -500,19 +500,7 @@ export function AccountInfo({
             <Table.Row key={alias} bg="bg.panel" _hover={{ bg: 'bg.muted' }}>
                 <Table.Cell px={2} py={3} width="56px" onClick={(e) => e.stopPropagation()}>
                     <Flex align="center" justify="center" minH="2.75em" px={1} py={1}>
-                        <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={onToggleSelect}
-                            colorPalette="blue"
-                            size="md"
-                            css={{
-                                '& [data-part=control], & .chakra-checkbox__control': {
-                                    borderRadius: '9999px',
-                                    width: '1.25rem',
-                                    height: '1.25rem',
-                                },
-                            }}
-                        />
+                        <RoundCheckbox checked={isSelected} onToggle={onToggleSelect} />
                     </Flex>
                 </Table.Cell>
 
@@ -574,16 +562,7 @@ export function AccountInfo({
 
                             {/* 标签单独一组 flexShrink=0，避免反噬曾用名 */}
                             <Flex align="center" gap={1} flexShrink={0}>
-                                {batchAccounts.includes(account.name) && (
-                                    <Tag.Root size="sm" p={0.5} colorPalette="purple" variant="solid" flexShrink={0}>
-                                        <Tag.Label fontSize="2xs" lineHeight="1">默认</Tag.Label>
-                                    </Tag.Root>
-                                )}
-                                {account.clan_forbid && (
-                                    <Tag.Root size="sm" colorPalette="red" variant="solid" flexShrink={0}>
-                                        <Tag.Label fontSize="2xs" lineHeight="1">公会战禁用</Tag.Label>
-                                    </Tag.Root>
-                                )}
+                                <AccountTags isDefault={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} compact />
                             </Flex>
                         </Flex>
 
@@ -630,22 +609,12 @@ export function AccountInfo({
                     title="进入详细设置"
                 >
                     <Flex align="center" gap={2} minW={0}>
-                        {isBusy ? (
-                            <Tag.Root colorPalette="blue" variant="subtle" flexShrink={0}>
-                                <Tag.StartElement css={{ boxSize: 'auto', ms: 0, display: 'flex', alignItems: 'center' }}>
-                                    <Spinner size="xs" />
-                                </Tag.StartElement>
-                                <Tag.Label>执行中</Tag.Label>
-                            </Tag.Root>
-                        ) : (
-                            <Tag.Root colorPalette={statusMeta.color} variant="subtle" flexShrink={0}>
-                                <Tag.StartElement>{statusMeta.icon}</Tag.StartElement>
-                                <Tag.Label>
-                                    {statusMeta.label}
-                                    {cleanTime ? ` ${cleanTime}` : ''}
-                                </Tag.Label>
-                            </Tag.Root>
-                        )}
+                        <StatusTag
+                            isBusy={isBusy}
+                            color={statusMeta.color}
+                            icon={statusMeta.icon}
+                            label={`${statusMeta.label}${cleanTime ? ` ${cleanTime}` : ''}`}
+                        />
                     </Flex>
                 </Table.Cell>
 
@@ -690,19 +659,7 @@ export function AccountInfo({
                         title="选择账号"
                         cursor="default"
                     >
-                        <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={onToggleSelect}
-                            colorPalette="blue"
-                            size="md"
-                            css={{
-                                '& [data-part=control], & .chakra-checkbox__control': {
-                                    borderRadius: '9999px',
-                                    width: '1.25rem',
-                                    height: '1.25rem',
-                                },
-                            }}
-                        />
+                        <RoundCheckbox checked={isSelected} onToggle={onToggleSelect} />
                     </Box>
 
                     <Flex align="center" gap={2} minW={0} flex="1" overflow="hidden">
@@ -741,16 +698,7 @@ export function AccountInfo({
                         )}
 
                         <Flex align="center" gap={1} flexShrink={0} minW={0}>
-                            {batchAccounts.includes(account.name) && (
-                                <Tag.Root size="sm" p={0.5} colorPalette="purple" variant="solid" flexShrink={0}>
-                                    <Tag.Label fontSize="2xs" lineHeight="1" whiteSpace="nowrap">默认</Tag.Label>
-                                </Tag.Root>
-                            )}
-                            {account.clan_forbid && (
-                                <Tag.Root size="sm" p={0.5} colorPalette="red" variant="subtle" flexShrink={0}>
-                                    <Tag.Label fontSize="2xs" lineHeight="1" whiteSpace="nowrap">禁用</Tag.Label>
-                                </Tag.Root>
-                            )}
+                            <AccountTags isDefault={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} />
                         </Flex>
                     </Flex>
 
@@ -818,19 +766,7 @@ export function AccountInfo({
                         <Text fontSize="xs" color="fg.muted" flexShrink={0}>
                             状态
                         </Text>
-                        {isBusy ? (
-                            <Tag.Root size="sm" colorPalette="blue" flexShrink={0}>
-                                <Tag.StartElement css={{ boxSize: 'auto', ms: 0, display: 'flex', alignItems: 'center' }}>
-                                    <Spinner size="xs" />
-                                </Tag.StartElement>
-                                <Tag.Label>执行中</Tag.Label>
-                            </Tag.Root>
-                        ) : (
-                            <Tag.Root size="sm" colorPalette={statusMeta.color} flexShrink={0}>
-                                <Tag.StartElement>{statusMeta.icon}</Tag.StartElement>
-                                <Tag.Label>{cleanStatus}</Tag.Label>
-                            </Tag.Root>
-                        )}
+                        <StatusTag isBusy={isBusy} color={statusMeta.color} icon={statusMeta.icon} label={cleanStatus} />
                     </Flex>
                 </Box>
             </Card.Body>

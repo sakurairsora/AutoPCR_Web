@@ -1,9 +1,7 @@
-refactor: Config 五套保存模板统一为 useConfigSaveFlow（S1）
+refactor: AccountCard 拆出共享 UI 件 AccountCardParts（S2）
 
-- 统一：乐观写父级 → 排队保存(enqueueConfigSave) → 成功/失败 toast → 失败回滚父级+显示
-- Bool/SingleSelect 经 useConfigState、Int/SingleSearch/Multi/Time/Text 直接迁移，六处共用一个实现
-- 各组件差异保留在调用点：Int 的 min/max 显示恢复、Multi 的 string[]→number[] 回滚转换、
-  SingleSearch 的 modal 异常分支、Time 的格式校验前置
-- 行为语义与迁移前一致；删除五份重复的 mountedRef/valueRef/onUpdateRef 模板
-
-另回滚 B3：选择器保留勾选/搜索状态是用户要的行为（跨开合延续，不复位）
+- RoundCheckbox：表格行与卡片头共用的圆形勾选框
+- AccountTags：默认/禁用标签组，compact 参数保留两视图既有差异（表格 solid+全称 / 卡片 subtle+短词）
+- StatusTag：执行中转圈与状态标签合一
+- 两分支各自保留：删除确认（文案不同）、头像、曾用名布局（宽度策略不同，未强行合并）
+- 视觉与行为不变，纯结构收拢
