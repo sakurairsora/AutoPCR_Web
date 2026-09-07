@@ -46,17 +46,29 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                 // 打开即校验：本地已存但后端已消失的功能在这里被自然排除
                 const detail = await getAccount(alias);
                 const areas = detail?.area || [];
-                const built: PickerGroup[] = [];
-                for (const area of areas) {
-                    const cached = getCachedAreaConfig(alias, area.key);
-                    const res = cached ?? (await getAccountConfig(alias, area.key));
-                    if (!cached) setCachedAreaConfig(alias, area.key, res);
+                // 限并发拉取：最多 3 路在途（服务器部署也扛得住），比纯串行快数倍；结果按 areas 原序归位
+                const FETCH_CONCURRENCY = 3;
+                const results: Awaited<ReturnType<typeof getAccountConfig>>[] = new Array(areas.length);
+                let cursor = 0;
+                const worker = async () => {
+                    while (cursor < areas.length) {
+                        const i = cursor++;
+                        const area = areas[i];
+                        const cached = getCachedAreaConfig(alias, area.key);
+                        const res = cached ?? (await getAccountConfig(alias, area.key));
+                        if (!cached) setCachedAreaConfig(alias, area.key, res);
+                        results[i] = res;
+                    }
+                };
+                await Promise.all(Array.from({ length: Math.min(FETCH_CONCURRENCY, areas.length) }, worker));
+                const built: PickerGroup[] = areas.map((area, i) => {
+                    const res = results[i];
                     const mods = (res?.order || [])
                         .map((k) => res.info?.[k])
                         .filter((m): m is ModuleInfo => !!m && m.implemented && m.runnable)
                         .map((m) => ({ key: m.key, name: m.name, dangerous: area.name === '危险' }));
-                    built.push({ areaKey: area.key, areaName: area.name, modules: mods });
-                }
+                    return { areaKey: area.key, areaName: area.name, modules: mods };
+                });
                 if (isMounted) setGroups(built);
             } catch (err) {
                 if (isMounted) {

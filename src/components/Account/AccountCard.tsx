@@ -20,8 +20,6 @@ import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interf
 interface AccountInfoProps {
     account: AccountInfoInterface;
     onToggle: () => void;
-    increaseCount: () => void;
-    decreaseCount: () => void;
     updateAccountInfo: (updatedAccount: AccountInfoInterface) => void;
     isTableView?: boolean;
     isSelected?: boolean;
@@ -38,8 +36,6 @@ interface AccountInfoProps {
 export function AccountInfo({
     account,
     onToggle,
-    increaseCount,
-    decreaseCount,
     updateAccountInfo,
     isTableView = false,
     isSelected = false,
@@ -97,7 +93,6 @@ export function AccountInfo({
         }
         buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
-        increaseCount();
         const nameForUi = displayNameRef.current || alias;
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
         try {
@@ -124,7 +119,6 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
-            decreaseCount();
         }
     };
 

@@ -30,7 +30,6 @@ import ReadmeModal from './ReadmeModal';
 import { Tooltip } from '../../components/ui/tooltip';
 import resetPasswdModal from '../Users/ResetPasswdModal';
 import { toaster } from '../../components/ui/toaster';
-import { useCountHook } from '../count';
 import { useDisclosure } from '@chakra-ui/react';
 import QuickActionPicker from './QuickActionPicker';
 import ConfigSyncModal from './ConfigSyncModal';
@@ -62,8 +61,10 @@ export function DashBoard() {
     const creatAccountSwitch = useDisclosure();
     const deleteQQConfirm = useDisclosure();
     const clearAccountConfirm = useDisclosure();
+    // 危险功能执行确认：弹站内 AlertDialog（代替原生 confirm），确认后接着执行
+    const dangerConfirm = useDisclosure();
+    const [pendingDanger, setPendingDanger] = useState<{ btn: QuickActionItem; free: string[]; targetDesc: string } | null>(null);
     const [alias, setAlias] = useState<string>('');
-    const [count, increaseCount, decreaseCount] = useCountHook();
     const [isTableView, setIsTableView] = useState<boolean>(() => {
         const savedView = localStorage.getItem('accountViewMode');
         return savedView ? savedView === 'table' : false;
@@ -239,12 +240,25 @@ export function DashBoard() {
         const resolved = resolveTargets(btn.name);
         if (!resolved) return;
         const free = resolved.free;
-        if (btn.dangerous && !window.confirm(`「${btn.name}」为危险功能，确定要对 ${free.length} 个账号执行吗？`)) {
+        if (btn.dangerous) {
+            // 站内确认弹窗（异步）：确认后在 onConfirmDanger 里继续执行
+            setPendingDanger({ btn, free, targetDesc: resolved.targetDesc });
+            dangerConfirm.onOpen();
             return;
         }
+        void executeQuickAction(btn, free, resolved.targetDesc);
+    };
+
+    const onConfirmDanger = () => {
+        dangerConfirm.onClose();
+        const pending = pendingDanger;
+        setPendingDanger(null);
+        if (pending) void executeQuickAction(pending.btn, pending.free, pending.targetDesc);
+    };
+
+    const executeQuickAction = async (btn: QuickActionItem, free: string[], targetDesc: string) => {
         free.forEach((name) => {
             setAccountBusy(name, true);
-            increaseCount();
         });
         let ok = 0;
         let fail = 0;
@@ -260,11 +274,9 @@ export function DashBoard() {
                     fail += 1;
                 } finally {
                     setAccountBusy(name, false);
-                    decreaseCount();
                 }
             }),
         );
-        const targetDesc = resolved.targetDesc;
         // 单账号 + 该账号开了弹结果：只弹详情窗，不叠汇总窗
         const singleDetail = free.length === 1 && loadPopupFlag(free[0]) && outcomes.get(free[0])?.ok && outcomes.get(free[0])?.res;
         if (popupResult && !singleDetail) {
@@ -488,7 +500,7 @@ export function DashBoard() {
                         borderWidth="1px"
                         borderColor="currentColor"
                         onClick={handleCleanDailyAll}
-                        loading={count != 0}
+                        loading={busyAccounts.size > 0}
                     >
                         <FiTarget /> {selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理批次日常' : '清理全部日常'}
                     </Button>
@@ -657,6 +669,20 @@ export function DashBoard() {
                 {' '}
             </Alert>
 
+            <Alert
+                leastDestructiveRef={cancelRef}
+                isOpen={dangerConfirm.open}
+                onClose={() => {
+                    dangerConfirm.onClose();
+                    setPendingDanger(null);
+                }}
+                title="执行危险功能"
+                body={`「${pendingDanger?.btn.name ?? ''}」为危险功能，确定要对 ${pendingDanger?.free.length ?? 0} 个账号执行吗？`}
+                onConfirm={onConfirmDanger}
+            >
+                {' '}
+            </Alert>
+
             {isTableView ? (
                 <Box borderRadius="xl">
                     <Table.Root variant="outline" colorPalette="blue" size="sm" bg="bg.panel" borderRadius="xl" boxShadow="sm" ml="0" mr="auto">
@@ -708,8 +734,6 @@ export function DashBoard() {
                                         key={account.name}
                                         account={account}
                                         onToggle={freshAccountInfo.onToggle}
-                                        increaseCount={increaseCount}
-                                        decreaseCount={decreaseCount}
                                         updateAccountInfo={updateAccountInfo}
                                         isTableView={isTableView}
                                         isSelected={selectedAccounts.includes(account.name)}
@@ -754,8 +778,6 @@ export function DashBoard() {
                                     key={account.name}
                                     account={account}
                                     onToggle={freshAccountInfo.onToggle}
-                                    increaseCount={increaseCount}
-                                    decreaseCount={decreaseCount}
                                     updateAccountInfo={updateAccountInfo}
                                     isTableView={isTableView}
                                     isSelected={selectedAccounts.includes(account.name)}

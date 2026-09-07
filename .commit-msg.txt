@@ -1,7 +1,6 @@
-refactor: AccountCard 拆出共享 UI 件 AccountCardParts（S2）
+refactor: S8/S10/S12 三项结构优化
 
-- RoundCheckbox：表格行与卡片头共用的圆形勾选框
-- AccountTags：默认/禁用标签组，compact 参数保留两视图既有差异（表格 solid+全称 / 卡片 subtle+短词）
-- StatusTag：执行中转圈与状态标签合一
-- 两分支各自保留：删除确认（文案不同）、头像、曾用名布局（宽度策略不同，未强行合并）
-- 视觉与行为不变，纯结构收拢
+- S8: 危险功能确认从原生 confirm 换站内 AlertDialog（与删账号同款式）；执行逻辑拆为 handleQuickAction(弹窗)/executeQuickAction(执行) 两段
+- S10: 功能选择器区服配置改限并发拉取（最多 3 路在途）：比串行快数倍，服务器部署也不会被并发打挂；结果按区服原序归位
+- S12: 删 useCountHook——批量按钮 loading 改由 busyAccounts.size>0 派生，一份状态一个真相；
+  AccountCard 的 increaseCount/decreaseCount props 与成对调用一并移除（busy 切换本就经 onBusyChange）
