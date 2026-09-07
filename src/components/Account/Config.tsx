@@ -9,7 +9,6 @@ import {
     Text,
     Textarea,
 } from '@chakra-ui/react';
-import { AxiosError } from 'axios';
 import NiceModal from '@ebay/nice-modal-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { putAccountConfig } from '@/api/Account';
@@ -74,23 +73,19 @@ export async function getErrorDescription(err: unknown, fallback = '网络错误
 const ROW_H = '2.25rem';
 const SINGLE_SEARCH_THRESHOLD = 30;
 
-function useConfigState<T>(
+/** 统一的配置保存流：乐观写父级 → 排队保存 → 成功/失败 toast → 失败回滚父级与显示。
+ *  各控件（Bool/Int/SingleSearch/Multi/Time/Text）共用，消灭五份手写模板。 */
+function useConfigSaveFlow(
     alias: string,
     key: string,
-    propValue: T,
+    propValue: ConfigValue,
     onConfigUpdate?: (key: string, value: ConfigValue) => void,
-    transform?: (val: T) => ConfigValue,
 ) {
-    const [state, setState] = useState<T>(propValue);
     const mountedRef = useRef(true);
-    const propRef = useRef(propValue);
-    propRef.current = propValue;
+    const valueRef = useRef(propValue);
+    valueRef.current = propValue;
     const onUpdateRef = useRef(onConfigUpdate);
     onUpdateRef.current = onConfigUpdate;
-
-    useEffect(() => {
-        setState(propValue);
-    }, [propValue]);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -99,29 +94,56 @@ function useConfigState<T>(
         };
     }, []);
 
-    const save = async (newValue: T): Promise<void> => {
-        // 在乐观回写父级之前先记下旧值，失败时才能真正回滚
-        const previous = propRef.current;
-        setState(newValue);
-        const payload = transform ? transform(newValue) : (newValue as ConfigValue);
-        // 先写父级缓存，折叠/切 Tab 再展开仍是新值
+    /** 乐观提交一个新值，返回是否保存成功。显示态由调用方乐观设置，失败时经 onRollbackDisplay 恢复。 */
+    const commit = async (
+        payload: ConfigValue,
+        opts?: {
+            /** 失败时恢复组件自己的显示（参数=改动前的已保存值） */
+            onRollbackDisplay?: (previous: ConfigValue) => void;
+            /** 回滚写回父级的值与 previous 不同时用它转换（如 Multi 的 string[]→number[]） */
+            rollbackPayload?: (previous: ConfigValue) => ConfigValue;
+        },
+    ): Promise<boolean> => {
+        const previous = valueRef.current;
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
+            return true;
         } catch (err) {
-            onUpdateRef.current?.(key, previous as ConfigValue);
+            onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(previous) : previous);
             if (mountedRef.current) {
-                setState(previous);
-                toaster.create({
-                    type: 'error',
-                    title: '保存失败',
-                    description: await getErrorDescription(err),
-                });
+                opts?.onRollbackDisplay?.(previous);
+                toaster.create({ type: 'error', title: '保存失败', description: await getErrorDescription(err) });
             }
+            return false;
         }
+    };
+
+    return { commit, valueRef };
+}
+
+
+function useConfigState<T>(
+    alias: string,
+    key: string,
+    propValue: T,
+    onConfigUpdate?: (key: string, value: ConfigValue) => void,
+    transform?: (val: T) => ConfigValue,
+) {
+    const [state, setState] = useState<T>(propValue);
+    const { commit } = useConfigSaveFlow(alias, key, propValue as ConfigValue, onConfigUpdate);
+
+    useEffect(() => {
+        setState(propValue);
+    }, [propValue]);
+
+    const save = async (newValue: T): Promise<void> => {
+        setState(newValue);
+        const payload = transform ? transform(newValue) : (newValue as ConfigValue);
+        await commit(payload, { onRollbackDisplay: () => setState(propValue) });
     };
 
     return [state, setState, save] as const;
@@ -155,26 +177,15 @@ function ConfigInt({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const max = candNums.length ? Math.max(...candNums) : Number.MAX_SAFE_INTEGER;
 
     const [numStr, setNumStr] = useState(value === undefined ? '' : String(value));
-    const mountedRef = useRef(true);
-    const valueRef = useRef(value);
-    valueRef.current = value;
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setNumStr(value === undefined ? '' : String(value));
     }, [value]);
 
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
-
     const handleBlur = () => {
         // 改动前已保存的值：清空/非法时恢复它，失败回滚也用它
-        const previous = valueRef.current;
+        const previous = value;
         const previousNum = typeof previous === 'number' ? previous : Number(previous);
         const parsed = Number(numStr);
         if (numStr === '' || isNaN(parsed)) {
@@ -191,25 +202,12 @@ function ConfigInt({ alias, value, info, onConfigUpdate }: ConfigProps) {
             return;
         }
         setNumStr(String(finalValue));
-        onUpdateRef.current?.(info.key, finalValue as ConfigValue);
-
-        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, finalValue as ConfigValue))
-            .then((res) => {
-                if (mountedRef.current) {
-                    toaster.create({ type: 'success', title: '保存成功', description: res });
-                }
-            })
-            .catch(async (err: AxiosError) => {
-                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
-                if (mountedRef.current) {
-                    setNumStr(Number.isFinite(previousNum) ? String(previousNum) : String(min));
-                    toaster.create({
-                        type: 'error',
-                        title: '保存失败',
-                        description: await getErrorDescription(err),
-                    });
-                }
-            });
+        void commit(finalValue as ConfigValue, {
+            onRollbackDisplay: (prev) => {
+                const prevNum = typeof prev === 'number' ? prev : Number(prev);
+                setNumStr(Number.isFinite(prevNum) ? String(prevNum) : String(min));
+            },
+        });
     };
 
     return (
@@ -267,20 +265,11 @@ function ConfigInt({ alias, value, info, onConfigUpdate }: ConfigProps) {
 
 function ConfigSingleSearch({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [localValue, setLocalValue] = useState<ConfigValue>(value);
-    const mountedRef = useRef(true);
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setLocalValue(value);
     }, [value]);
-
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
 
     const displayText = (() => {
         const unit = info.candidates.find((u) => u.value === localValue);
@@ -304,22 +293,12 @@ function ConfigSingleSearch({ alias, value, info, onConfigUpdate }: ConfigProps)
 
             // 乐观更新显示，失败再回滚
             setLocalValue(ret);
-            onUpdateRef.current?.(info.key, ret);
-            const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, ret));
-            if (mountedRef.current) {
-                toaster.create({ type: 'success', title: '保存成功', description: res });
-            }
+            await commit(ret, { onRollbackDisplay: (prev) => setLocalValue(prev) });
         } catch (err) {
-            onUpdateRef.current?.(info.key, previousValue);
+            // NiceModal.show 本身的异常（如组件崩溃）：恢复显示
+            setLocalValue(previousValue);
             try { await NiceModal.hide(singleSelectModal); } catch { /* ignore */ }
-            if (mountedRef.current) {
-                setLocalValue(previousValue);
-                toaster.create({
-                    type: 'error',
-                    title: '保存失败',
-                    description: await getErrorDescription(err),
-                });
-            }
+            toaster.create({ type: 'error', title: '打开选择器失败', description: await getErrorDescription(err) });
         }
     };
 
@@ -391,52 +370,30 @@ function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
     );
 
     const [groupValue, setGroupValue] = useState(initialStrArr);
-    const mountedRef = useRef(true);
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
     const initialRef = useRef(initialStrArr);
     initialRef.current = initialStrArr;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setGroupValue(initialStrArr);
     }, [initialStrArr]);
-
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
 
     const handleSave = (newStrArr: string[]) => {
         let postValue: ConfigValue = newStrArr;
         const intArr = newStrArr.map(Number);
         if (intArr.length > 0 && intArr.every((n) => !isNaN(n))) postValue = intArr;
 
-        // 乐观回写前先记旧值，失败才能真正回滚
+        // 乐观回写，失败经统一流回滚（回滚值做同样的 string[]→number[] 转换）
         const rollback = initialRef.current;
         setGroupValue(newStrArr);
-        onUpdateRef.current?.(info.key, postValue);
-        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, postValue))
-            .then((res) => {
-                if (mountedRef.current) {
-                    toaster.create({ type: 'success', title: '保存成功', description: res });
-                }
-            })
-            .catch(async (err: AxiosError) => {
-                let rollbackPayload: ConfigValue = rollback;
-                const ints = rollback.map(Number);
-                if (ints.length > 0 && ints.every((n) => !isNaN(n))) rollbackPayload = ints;
-                onUpdateRef.current?.(info.key, rollbackPayload);
-                if (mountedRef.current) {
-                    setGroupValue(rollback);
-                    toaster.create({
-                        type: 'error',
-                        title: '保存失败',
-                        description: await getErrorDescription(err),
-                    });
-                }
-            });
+        void commit(postValue, {
+            onRollbackDisplay: () => setGroupValue(rollback),
+            rollbackPayload: (prev) => {
+                const rb = Array.isArray(prev) ? prev.map(String) : [];
+                const ints = rb.map(Number);
+                return ints.length > 0 && ints.every((n) => !isNaN(n)) ? ints : rb;
+            },
+        });
     };
 
     return (
@@ -468,25 +425,14 @@ function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
 
 function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [timeStr, setTimeStr] = useState(value as string);
-    const mountedRef = useRef(true);
-    const valueRef = useRef(value);
-    valueRef.current = value;
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setTimeStr(value as string);
     }, [value]);
 
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
-
     const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-        const previous = (valueRef.current ?? '') as string;
+        const previous = (value ?? '') as string;
         const newValue = e.target.value;
         if (newValue === previous) return; // 内容没变：不保存
         const m = newValue.match(/^(\d{2}):(\d{2})$/);
@@ -497,24 +443,9 @@ function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
             return;
         }
         setTimeStr(newValue);
-        onUpdateRef.current?.(info.key, newValue as ConfigValue);
-        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, newValue as ConfigValue))
-            .then((res) => {
-                if (mountedRef.current) {
-                    toaster.create({ type: 'success', title: '保存成功', description: res });
-                }
-            })
-            .catch(async (err: AxiosError) => {
-                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
-                if (mountedRef.current) {
-                    setTimeStr(previous);
-                    toaster.create({
-                        type: 'error',
-                        title: '保存失败',
-                        description: await getErrorDescription(err),
-                    });
-                }
-            });
+        void commit(newValue as ConfigValue, {
+            onRollbackDisplay: (prev) => setTimeStr((prev ?? '') as string),
+        });
     };
 
     return (
@@ -536,22 +467,11 @@ function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
 function ConfigText({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [textStr, setTextStr] = useState((value ?? '') as string);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const mountedRef = useRef(true);
-    const valueRef = useRef(value);
-    valueRef.current = value;
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setTextStr((value ?? '') as string);
     }, [value]);
-
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
 
     useLayoutEffect(() => {
         const el = textareaRef.current;
@@ -562,28 +482,13 @@ function ConfigText({ alias, value, info, onConfigUpdate }: ConfigProps) {
     }, [textStr]);
 
     const handleBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
-        const previous = (valueRef.current ?? '') as string;
+        const previous = (value ?? '') as string;
         const newValue = e.target.value;
         if (newValue === previous) return; // 内容没变：不保存
         setTextStr(newValue);
-        onUpdateRef.current?.(info.key, newValue as ConfigValue);
-        enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, newValue as ConfigValue))
-            .then((res) => {
-                if (mountedRef.current) {
-                    toaster.create({ type: 'success', title: '保存成功', description: res });
-                }
-            })
-            .catch(async (err: AxiosError) => {
-                if (previous !== undefined) onUpdateRef.current?.(info.key, previous as ConfigValue);
-                if (mountedRef.current) {
-                    setTextStr(previous);
-                    toaster.create({
-                        type: 'error',
-                        title: '保存失败',
-                        description: await getErrorDescription(err),
-                    });
-                }
-            });
+        void commit(newValue as ConfigValue, {
+            onRollbackDisplay: (prev) => setTextStr((prev ?? '') as string),
+        });
     };
 
     return (
