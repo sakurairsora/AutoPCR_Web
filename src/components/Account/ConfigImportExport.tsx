@@ -12,6 +12,7 @@ import {getAccountConfig, putAccountConfigs} from "@api/Account.ts";
 
 import {AreaInfo} from "@interfaces/Account.ts";
 import {AxiosError} from "axios";
+import { favKey } from "./accountShared";
 import {saveAs} from "file-saver";
 import { toaster } from "@components/ui/toaster";
 import { getErrorDescription } from "./Config";
@@ -167,9 +168,16 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
                 throw new Error('文件中没有可用配置，未做任何修改。');
             }
 
-            // 全部成功后才写收藏，避免半导入状态（PUT 失败不覆盖现有收藏）
+            // 全部成功后才写收藏，避免半导入状态（PUT 失败不覆盖现有收藏）。
+            // 文件不含任何 _fav_ 键（旧版导出）时不动现有收藏；收藏写失败只降级提示，不报"导入失败"
             await putAccountConfigs(alias, uploadConfig);
-            localStorage.setItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
+            if (Object.keys(importedFav).length > 0) {
+                try {
+                    localStorage.setItem(favKey(alias), JSON.stringify(importedFav));
+                } catch {
+                    toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' });
+                }
+            }
             toaster.create({ type: 'success', title: '配置导入成功' });
             
             // 优化 2：无缝通知父级重新拉取数据刷新页面

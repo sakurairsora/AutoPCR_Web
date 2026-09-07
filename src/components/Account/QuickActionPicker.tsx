@@ -10,7 +10,7 @@ import {
 } from '../../components/ui/modal';
 import { Checkbox } from '../../components/ui/checkbox';
 import NiceModal, { useModal } from '@ebay/nice-modal-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAccount, getAccountConfig } from '@api/Account';
 import { ModuleInfo } from '@interfaces/Module';
 import { Skeleton } from '../../components/ui/skeleton';
@@ -36,6 +36,14 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
     const [selected, setSelected] = useState<Set<string>>(() => new Set(current.map((b) => b.key)));
     const [searchText, setSearchText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // NiceModal hide 后组件不卸载：每次重新打开时把勾选/搜索复位到当前实况，而不是残留上次未保存的改动
+    const lastVisibleRef = useRef(false);
+    if (modal.visible && !lastVisibleRef.current) {
+        setSelected(new Set(current.map((b) => b.key)));
+        setSearchText('');
+    }
+    lastVisibleRef.current = modal.visible;
 
     useEffect(() => {
         if (!modal.visible || !alias) return;

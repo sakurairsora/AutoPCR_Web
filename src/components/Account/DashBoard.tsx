@@ -42,7 +42,7 @@ import { NotifySettings } from './accountShared';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem, resetNotifyWatcherState } from './accountShared';
+import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -97,7 +97,7 @@ export function DashBoard() {
     }, [batchAccounts]);
 
     useEffect(() => {
-        safeSetItem('autopcr_popupResult', popupResult ? 'true' : 'false');
+        safeSetItem(POPUP_MASTER_KEY, popupResult ? 'true' : 'false');
     }, [popupResult]);
 
     // 批次名单随账号列表自动剔除失效项（依赖名单序列化：删一加一 length 不变也能触发）
@@ -208,37 +208,37 @@ export function DashBoard() {
 
     const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === (userInfo?.accounts?.length ?? 0);
 
-    const handleCleanDailyAll = () => {
+    /** 批量目标解析（唯一实现）：勾选 > 自动批次 > 全体（排除 BATCH_RUNNER），忙碌切分+提示；无可执行目标时返回 null */
+    const resolveTargets = (actionName: string): { free: string[]; targetDesc: string } | null => {
         const allNames = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
+        const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyRef.current.has(name));
         const busy = targets.filter((name) => busyRef.current.has(name));
         if (free.length === 0) {
             toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选账号都正在执行中' });
-            return;
+            return null;
         }
         if (busy.length > 0) {
-            toaster.create({ type: 'info', title: `已跳过 ${busy.length} 个正在执行中的账号` });
+            toaster.create({ type: 'info', title: `${actionName}：已跳过 ${busy.length} 个正在执行中的账号` });
         }
-        for (const name of free) {
+        return { free, targetDesc };
+    };
+
+    const handleCleanDailyAll = () => {
+        const resolved = resolveTargets('清理日常');
+        if (!resolved) return;
+        for (const name of resolved.free) {
             const fn = handle.get(name);
-            if (fn) fn(false);
+            void fn?.();
         }
     };
 
     // 自定义功能按钮：目标=勾选的账号 > 自动批次（没勾选时） > 全体（批次也为空时）；忙碌账号跳过；危险功能先确认
     const handleQuickAction = async (btn: QuickActionItem) => {
-        const allNames = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
-        const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
-        const free = targets.filter((name) => !busyRef.current.has(name));
-        const busy = targets.filter((name) => busyRef.current.has(name));
-        if (free.length === 0) {
-            toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选账号都正在执行中' });
-            return;
-        }
-        if (busy.length > 0) {
-            toaster.create({ type: 'info', title: `${btn.name}：已跳过 ${busy.length} 个正在执行中的账号` });
-        }
+        const resolved = resolveTargets(btn.name);
+        if (!resolved) return;
+        const free = resolved.free;
         if (btn.dangerous && !window.confirm(`「${btn.name}」为危险功能，确定要对 ${free.length} 个账号执行吗？`)) {
             return;
         }
@@ -264,7 +264,7 @@ export function DashBoard() {
                 }
             }),
         );
-        const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
+        const targetDesc = resolved.targetDesc;
         // 单账号 + 该账号开了弹结果：只弹详情窗，不叠汇总窗
         const singleDetail = free.length === 1 && loadPopupFlag(free[0]) && outcomes.get(free[0])?.ok && outcomes.get(free[0])?.res;
         if (popupResult && !singleDetail) {
@@ -272,23 +272,21 @@ export function DashBoard() {
                 const o = outcomes.get(name);
                 return { alias: name, name: getDisplayName(name), status: o?.ok ? '成功' : '失败', detail: o?.ok ? undefined : o?.detail };
             });
-            NiceModal.show(ResultSummaryModal, { title: `${btn.name} · ${targetDesc}`, rows }).catch(() => {
-                return;
-            });
-        } else {
+            NiceModal.show(ResultSummaryModal, { title: `${btn.name} · ${targetDesc}`, rows }).catch(() => {});
+        }
+        // 没开弹结果时才用 toast 反馈（弹窗本身就是反馈，不叠 toast）
+        if (!popupResult) {
             toaster.create({
                 type: fail > 0 ? 'warning' : 'success',
-                title: `${btn.name} 执行完成`,
-                description: `成功 ${ok} / 失败 ${fail}（目标：${targetDesc}），结果默认不弹窗，可在各账号详情的功能区里查看`,
+                title: `${btn.name} 执行完毕`,
+                description: fail > 0 ? `成功 ${ok} / 失败 ${fail}，请在各账号详情的功能区里查看结果` : '请在各账号详情的功能区里查看结果',
             });
         }
         // 仅对单账号执行且该账号开了"弹结果"标记的，直接弹该账号的功能结果窗
         if (singleDetail) {
             const o = outcomes.get(free[0]);
             if (o?.res) {
-                NiceModal.show(ResultInfoModal, { alias: free[0], title: btn.name, resultInfo: o.res }).catch(() => {
-                    return;
-                });
+                NiceModal.show(ResultInfoModal, { alias: free[0], title: btn.name, resultInfo: o.res }).catch(() => {});
             }
         }
     };
@@ -547,7 +545,7 @@ export function DashBoard() {
                                 colorPalette={isTableView ? "blue" : "gray"}
                                 onClick={() => {
                                     setIsTableView(true);
-                                    safeSetItem('accountViewMode', 'table');
+                                    safeSetItem(VIEW_MODE_KEY, 'table');
                                 }}
                             >
                                 <FiList />
@@ -561,7 +559,7 @@ export function DashBoard() {
                                 colorPalette={!isTableView ? "blue" : "gray"}
                                 onClick={() => {
                                     setIsTableView(false);
-                                    safeSetItem('accountViewMode', 'card');
+                                    safeSetItem(VIEW_MODE_KEY, 'card');
                                 }}
                             >
                                 <FiGrid />

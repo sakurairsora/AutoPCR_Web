@@ -1,0 +1,17 @@
+fix: 第三轮审计修复（B1-B4/B8 + S3/S4/S5/S9/S11/S13）
+
+- B1: 快捷按钮 toast 按弹结果开关区分——弹窗即反馈不叠 toast；未开时提示"在各账号详情查看结果"（用户裁决文案）
+- B2: 批量清理注册表改稳定包装+身份校验删除：重排不误删新注册；类型改 () => void | Promise<void>，去掉 as any 与死参数
+- B3: QuickActionPicker 重开复位勾选/搜索（边沿复位，同 MultiSelectModal 模板）
+- B4: 配置导入两处——收藏写失败降级提示不再误报"导入失败"；文件无 _fav_ 键（旧版）不再清空现有收藏
+- B8: $account 弹结果拆两段 catch：modal 关闭不再误报"结果获取失败"
+- S3: 目标解析三份拷贝收拢为 resolveTargets（勾选>批次>全体，唯一实现）
+- S4: 存储键常量化补齐（VIEW_MODE_KEY/favKey），$account 五处裸读改 getDisplayName
+- S5: safeGetItem 兜底读（禁 cookie 浏览器 SecurityError 不再炸渲染）
+- S9: buttomLoading→buttonLoading 拼写；Module favKey 用共享常量
+- S11: 静音/去重判定统一进 alarmWorthNotifying（未知模块不静音语义保持）
+- S13: 空 catch 包装简化；文件尾换行（上轮已修，本轮审计读的旧 JSON）
+
+拒绝项：S1 useOptimisticSave 大重构（5组件行为语义，风险>收益）；S2 AccountCard 拆分（用户待定，独立轮次）；
+S6 注册表改名（纯噪音）；S7 as any 清扫（路由类型化限制+后端类型缺口，范围外）；S8 confirm→Modal（产品决策）；
+S10 picker 并行化（缓存写入顺序需单独验证）；S12 双份忙状态合并（涉及布局层）

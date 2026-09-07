@@ -12,7 +12,7 @@ import NiceModal from '@ebay/nice-modal-react';
 import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -74,8 +74,8 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
     const handleToggleFav = async (e: React.MouseEvent) => {
         e.stopPropagation();
-        const favKey = `autopcr_fav_${alias}`;
-        const stored = localStorage.getItem(favKey);
+        const favKeyValue = favKey(alias);
+        const stored = safeGetItem(favKeyValue);
         let favMap: Record<string, string[]> = {};
         if (stored) {
             try {
@@ -95,7 +95,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
         favMap[areaKey] = Array.from(areaFavs);
         try {
-            localStorage.setItem(favKey, JSON.stringify(favMap));
+            localStorage.setItem(favKeyValue, JSON.stringify(favMap));
         } catch {
             toaster.create({ type: 'error', title: '收藏保存失败', description: '本地存储不可用或已满' });
             return;

@@ -9,12 +9,13 @@ import { toaster } from '../../components/ui/toaster';
 
 
 
-export const handle: Map<string, (arg0: boolean) => void> = new Map<string, (arg0: boolean) => void>();
+/** 批量清理登记表：账号名 → 清理回调（注册方保证包 ref，调用方无参调用） */
+export const handle: Map<string, () => void | Promise<void>> = new Map();
 
 export const DISPLAY_NAME_KEY = (alias: string) => 'autopcr_displayName_' + alias;
 
 export function getDisplayName(alias: string): string {
-    return localStorage.getItem(DISPLAY_NAME_KEY(alias)) || alias;
+    return safeGetItem(DISPLAY_NAME_KEY(alias)) || alias;
 }
 
 /** 每账号"弹结果"标记：该账号执行完自动弹出结果窗 */
@@ -22,14 +23,20 @@ export const POPUP_FLAG_KEY = (alias: string) => 'autopcr_popupResult_' + alias;
 
 export function loadPopupFlag(alias: string): boolean {
     // 默认勾选：只有明确存过 'false'（用户关掉过）才静默
-    return localStorage.getItem(POPUP_FLAG_KEY(alias)) !== 'false';
+    return safeGetItem(POPUP_FLAG_KEY(alias)) !== 'false';
 }
 
 /** 「弹结果」总开关（工具栏勾选框），默认开 */
 export const POPUP_MASTER_KEY = 'autopcr_popupResult';
 
+/** 主页账号视图模式（表格/卡片） */
+export const VIEW_MODE_KEY = 'accountViewMode';
+
+/** 账号收藏（区服→功能名列表）存储键 */
+export const favKey = (alias: string) => `autopcr_fav_${alias}`;
+
 export function loadPopupMaster(): boolean {
-    return localStorage.getItem(POPUP_MASTER_KEY) !== 'false';
+    return safeGetItem(POPUP_MASTER_KEY) !== 'false';
 }
 
 /** 周期通知：开关 + 静音名单（模块 key），存本地 */
@@ -42,7 +49,7 @@ const NOTIFY_KEY = 'autopcr_notify_v1';
 
 export function loadNotifyPrefs(): NotifyPrefs {
     try {
-        const raw = localStorage.getItem(NOTIFY_KEY);
+        const raw = safeGetItem(NOTIFY_KEY);
         const parsed = raw ? (JSON.parse(raw) as Partial<NotifyPrefs>) : null;
         let muted = Array.isArray(parsed?.muted) ? parsed.muted.filter((x): x is string => typeof x === 'string') : [];
         // 旧版本存的是中文名：换成模块 key，静音才不会被 key 精确匹配打穿
@@ -68,7 +75,7 @@ const NOTIFY_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function wasNotifiedRecently(classId: string): boolean {
     try {
-        const raw = localStorage.getItem(NOTIFY_SENT_KEY);
+        const raw = safeGetItem(NOTIFY_SENT_KEY);
         const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
         const last = map[classId];
         return typeof last === 'number' && Date.now() - last < NOTIFY_MONTH_MS;
@@ -122,7 +129,7 @@ const BATCH_KEY = 'autopcr_batch_v1';
 
 export function loadBatch(): string[] {
     try {
-        const raw = localStorage.getItem(BATCH_KEY);
+        const raw = safeGetItem(BATCH_KEY);
         const parsed: unknown = raw ? JSON.parse(raw) : null;
         const list = (parsed as { accounts?: unknown } | null)?.accounts;
         if (Array.isArray(list)) {
@@ -139,6 +146,15 @@ export function saveBatch(accounts: string[]): void {
         localStorage.setItem(BATCH_KEY, JSON.stringify({ version: 1, accounts }));
     } catch {
         // 本地存储不可用则仅本次会话有效
+    }
+}
+
+/** localStorage 读兜底：隐私模式/禁 cookie 场景访问 localStorage 即抛 SecurityError，读函数必须吞掉 */
+export function safeGetItem(key: string): string | null {
+    try {
+        return localStorage.getItem(key);
+    } catch {
+        return null;
     }
 }
 
@@ -256,9 +272,10 @@ const notifyTrailing = new Set<string>();
 /** 已知的可静音模块 key 集合 */
 const CANDIDATE_KEYS = new Set(NOTIFY_CANDIDATES.map((c) => c.key));
 
-/** 该警报是否值得弹：静音按 key 精确匹配（优先）；活动h本只豁免去重、静音依然有效 */
+/** 该警报是否值得弹：已知模块（候选表内）静音按 key + 月度去重（活动h本豁免去重）；未知模块不静音、只做月度去重 */
 function alarmWorthNotifying(key: string, muted: string[]): boolean {
-    if (muted.includes(key)) return false;
+    const known = CANDIDATE_KEYS.has(key);
+    if (known && muted.includes(key)) return false;
     if (key === NOTIFY_NO_DEDUP_KEY) return true; // 活动h本：不去重，每次都弹（复刻活动并存会漏扫）
     return !wasNotifiedRecently(key);
 }
@@ -284,13 +301,8 @@ export function NotifyWatcher(): null {
                         alarmSeenByAlias.set(alias, false); // 该账号恢复正常：重新武装
                         return;
                     }
-                    // 逐个筛查全部警报模块（find 逐项判断，第一个被抑制不挡后面的）：
-                    // 已知模块（候选表内）静音按 key；未知模块不静音但参与月度去重
-                    const chosen = alarms.find(
-                        ([key]) => CANDIDATE_KEYS.has(key)
-                            ? alarmWorthNotifying(key, prefsMuted)
-                            : !wasNotifiedRecently(key),
-                    );
+                    // 逐个筛查全部警报模块（find 逐项判断，第一个被抑制不挡后面的）：静音/去重判定统一在 alarmWorthNotifying
+                    const chosen = alarms.find(([key]) => alarmWorthNotifying(key, prefsMuted));
                     if (!chosen) return; // 全部被抑制：不弹，也不置警报态（被静音的旧警报不该吞掉后续新警报）
                     if (chosen[0] !== NOTIFY_NO_DEDUP_KEY) {
                         markNotifiedForClass(chosen[0]);

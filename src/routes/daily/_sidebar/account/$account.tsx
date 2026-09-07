@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -40,7 +40,7 @@ function AccountComponent() {
     );
 
     const [displayName, setDisplayName] = useState(
-        () => localStorage.getItem(`autopcr_displayName_${account}`) || account,
+        () => getDisplayName(account),
     );
 
     // 「弹结果」：本账号执行完自动弹出结果窗（本地存储，按账号记忆）
@@ -70,7 +70,7 @@ function AccountComponent() {
         try {
             const freshData = await getAccount(account);
             setAccountInfo(freshData);
-            setDisplayName(localStorage.getItem(`autopcr_displayName_${account}`) || account);
+            setDisplayName(getDisplayName(account));
             const st = (freshData as any)?.daily_clean_time?.status;
             if (st) setCleanStatus(st);
         } catch (e) {
@@ -87,14 +87,14 @@ function AccountComponent() {
     useEffect(() => {
         setAccountInfo(initialAccountInfo);
         setActiveTab(initialTab);
-        setDisplayName(localStorage.getItem(`autopcr_displayName_${account}`) || account);
+        setDisplayName(getDisplayName(account));
         setCleanStatus((initialAccountInfo as any)?.daily_clean_time?.status || '');
         setFavOnlyMap({});
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [account]);
 
     useEffect(() => {
-        setDisplayName(localStorage.getItem(`autopcr_displayName_${account}`) || account);
+        setDisplayName(getDisplayName(account));
         const st = (initialAccountInfo as any)?.daily_clean_time?.status;
         if (st) setCleanStatus(st);
     }, [initialAccountInfo, account]);
@@ -121,7 +121,7 @@ function AccountComponent() {
     const handleCleanDaily = async () => {
         const a = accountInfo?.alias || account;
         const nameForUi =
-            localStorage.getItem(`autopcr_displayName_${a}`) || displayName || a;
+            getDisplayName(a) || displayName || a;
 
         setCleanLoading(true);
         setCleanStatus('');
@@ -149,7 +149,8 @@ function AccountComponent() {
             if (popupOn) {
                 getAccountDailyResultList(a)
                     .then((resList) => {
-                        return NiceModal.show(ResultInfoModal, { alias: a, title: '日常', resultInfo: resList });
+                        // modal 关闭路径的 reject 不是拉取失败，单独吞掉
+                        void NiceModal.show(ResultInfoModal, { alias: a, title: '日常', resultInfo: resList }).catch(() => {});
                     })
                     .catch(() => {
                         toaster.create({ type: 'warning', title: '结果获取失败', description: '无法拉取本次日常结果' });

@@ -15,7 +15,7 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem } from './accountShared';
+import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, favKey } from './accountShared';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
     account: AccountInfoInterface;
@@ -50,7 +50,7 @@ export function AccountInfo({
     onBusyChange,
     getOccupiedNames,
 }: AccountInfoProps) {
-    const buttomLoading = useDisclosure();
+    const buttonLoading = useDisclosure();
     const alias = account.name;
     const deleteConfirm = useDisclosure();
     const navigate = useNavigate();
@@ -95,7 +95,7 @@ export function AccountInfo({
             toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
             return;
         }
-        buttomLoading.onOpen();
+        buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
         increaseCount();
         const nameForUi = displayNameRef.current || alias;
@@ -122,17 +122,21 @@ export function AccountInfo({
                 description: await getErrorDescription(err),
             });
         } finally {
-            buttomLoading.onClose();
+            buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
             decreaseCount();
         }
     };
 
-    // 批量清理用：只按账号原名注册（显示名仅用于提示文案，经 ref 取最新值），卸载时删掉
+    // 批量清理用：只按账号原名注册（显示名仅用于提示文案，经 ref 取最新值）。
+    // 注册稳定包装（内部经 ref 取最新回调）：列表重排时新卡先挂旧卡后卸，身份校验删除避免误删新注册
+    const cleanDailyRef = useRef(handleCleanDaily);
+    cleanDailyRef.current = handleCleanDaily;
     useEffect(() => {
-        handle.set(alias, handleCleanDaily as any);
+        const registered = () => cleanDailyRef.current();
+        handle.set(alias, registered);
         return () => {
-            handle.delete(alias);
+            if (handle.get(alias) === registered) handle.delete(alias);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [alias]);
@@ -340,7 +344,7 @@ export function AccountInfo({
         event.target.value = '';
         if (!file) return;
 
-        buttomLoading.onOpen();
+        buttonLoading.onOpen();
         try {
             const rawCfg = await file.text();
             let configs: Record<string, Record<string, ConfigValue>>;
@@ -388,8 +392,10 @@ export function AccountInfo({
                 throw new Error('文件中没有可用配置，未做任何修改。');
             }
             await putAccountConfigs(alias, uploadConfig);
-            // 全部成功后才写收藏，避免半导入状态
-            safeSetItem(`autopcr_fav_${alias}`, JSON.stringify(importedFav));
+            // 全部成功后才写收藏；文件不含任何 _fav_ 键（旧版导出）时不动现有收藏
+            if (Object.keys(importedFav).length > 0) {
+                safeSetItem(favKey(alias), JSON.stringify(importedFav));
+            }
             toaster.create({ type: 'success', title: '配置导入成功' });
             onToggle();
         } catch (err) {
@@ -407,7 +413,7 @@ export function AccountInfo({
                 });
             }
         } finally {
-            buttomLoading.onClose();
+            buttonLoading.onClose();
         }
     };
 
@@ -439,7 +445,7 @@ export function AccountInfo({
                     variant="ghost"
                     colorPalette="orange"
                     onClick={handleCleanDaily}
-                    loading={buttomLoading.open}
+                    loading={buttonLoading.open}
                 >
                     <FiTarget />
                 </IconButton>
@@ -453,7 +459,7 @@ export function AccountInfo({
                     variant="ghost"
                     colorPalette="blue"
                     onClick={() => importFileRef.current?.click()}
-                    loading={buttomLoading.open}
+                    loading={buttonLoading.open}
                 >
                     <FiUpload />
                 </IconButton>
@@ -467,7 +473,7 @@ export function AccountInfo({
                     variant="ghost"
                     colorPalette="teal"
                     onClick={() => onOpenSyncConfig && onOpenSyncConfig(alias)}
-                    loading={buttomLoading.open}
+                    loading={buttonLoading.open}
                 >
                     <FiCopy />
                 </IconButton>
@@ -481,7 +487,7 @@ export function AccountInfo({
                     variant="ghost"
                     colorPalette="green"
                     onClick={handleDailyResult}
-                    loading={buttomLoading.open}
+                    loading={buttonLoading.open}
                 >
                     <FiActivity />
                 </IconButton>
