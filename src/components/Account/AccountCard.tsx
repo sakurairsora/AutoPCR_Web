@@ -92,6 +92,7 @@ export function AccountInfo({
         }
         buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
+        busyRef.current = true; // 导入等本地动作同以 busyRef 为互斥源，这里对称置位
         const nameForUi = displayNameRef.current || alias;
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
         try {
@@ -118,6 +119,7 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
+            busyRef.current = false;
         }
     };
 
@@ -279,6 +281,8 @@ export function AccountInfo({
         if (!file) return;
 
         buttonLoading.onOpen();
+        onBusyRef.current?.(alias, true);
+        busyRef.current = true; // 导入期间登记忙：批量动作跳过本账号（互斥对称）
         try {
             const rawCfg = await file.text();
             // 区服名单现查（弹窗版用 props 传入的 areas，流程本体在 accountShared.importConfigFile）
@@ -307,6 +311,8 @@ export function AccountInfo({
             }
         } finally {
             buttonLoading.onClose();
+            onBusyRef.current?.(alias, false);
+            busyRef.current = false;
         }
     };
 

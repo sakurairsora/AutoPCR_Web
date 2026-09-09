@@ -1,11 +1,5 @@
-refactor: 专项轮——分隔线深色适配、撤销执行限并发、导入三胞胎收簸、双 effect 定罪存档
+fix: 导入配置期间登记 busy（互斥对称）
 
-- 分隔线 bg="black" → border.subtle（DashBoard/$account 两处；"黑色"仅指浅色模式观感，深色下要可见）
-- 撤销 executeQuickAction 限并发，恢复全并发（用户裁决：多账号同时执行同一动作的语义就是"一起跑"）
-- 导入配置收簸：toCheckedConfigItem/realImportByModule/importConfigFile 三个双胞胎合并进 accountShared，
-  卡片与 ConfigImportExport 只剩 UI 壳；收藏写失败统一为降级警告（原来卡片侧静默）；
-  bool 校验收紧为仅 boolean（原卡片版接受任意值会静默导入损坏文件的部分配置）
-- ConfigImportExport 导出时内联 favKey 换共享 favKey(alias)
-- $account 双 effect 经排查非 bug（换号=重置 effect 先行+跟进 effect 收尾，声明序保证；本页刷新只跑跟进 effect）——
-  补注释固化语义，refreshAccountData 直接写保留（loader 快照不随本页刷新变化，effect 收不到）
-- 批量炼成按钮 loading+disabled 仅视觉反馈，不改变任何提交行为（防"点了没反应"的观感问题）
+- 导入配置（卡片版）进入即 onBusyChange(alias,true)+busyRef 置位，finally 对称复位：
+  批量动作在导入期间跳过该账号，不再两边同时打后端；清理日常同样补 busyRef 置位/复位（原只查不写，
+  导入中点清理拦不住的窗口闭合）
