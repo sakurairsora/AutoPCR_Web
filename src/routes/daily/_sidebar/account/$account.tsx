@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName, busyAccountsRef } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -136,6 +136,14 @@ function AccountComponent() {
 
         setCleanLoading(true);
         setCleanStatus('');
+        // 忙碌互斥第六条路径：详情页清理与卡片清理是同一个长任务接口，双向都要设防——
+        // 主页批量/同步把该账号当目标、或该账号已在主页执行中，这里在途时另一侧必须被拒（点击时点互斥）
+        if (busyAccountsRef.has(a)) {
+            toaster.create({ type: 'warning', title: `${nameForUi}正在执行中`, description: '请等待当前操作完成' });
+            setCleanLoading(false);
+            return;
+        }
+        busyAccountsRef.add(a);
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
 
         try {
@@ -179,6 +187,8 @@ function AccountComponent() {
         } finally {
             // 换号后 loading 交给重置 effect，这里不再碰（晚到 finally 会把 B 页的按钮状态搅乱）
             if (accountRef.current === a) setCleanLoading(false);
+            // 本笔是该账号忙碌登记的唯一作者（互斥网保证执行期间无并发路径），直接清
+            busyAccountsRef.delete(a);
         }
     };
 

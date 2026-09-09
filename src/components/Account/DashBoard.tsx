@@ -237,8 +237,8 @@ export function DashBoard() {
         const allNames = selectableNames;
         const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
-        const free = targets.filter((name) => !busyRef.current.has(name));
-        const busy = targets.filter((name) => busyRef.current.has(name));
+        const free = targets.filter((name) => !busyAccountsRef.has(name));
+        const busy = targets.filter((name) => busyAccountsRef.has(name));
         if (targets.length === 0) {
             // 没有目标与「都在忙」是两回事：前者引导建号，后者才让等
             toaster.create({ type: 'info', title: '请先创建一个账号' });
@@ -285,8 +285,8 @@ export function DashBoard() {
     };
 
     const executeQuickAction = async (btn: QuickActionItem, free: string[], targetDesc: string) => {
-        // 弹窗停留期间的过期快照防护：确认前新变忙的账号在这里二次剔除
-        const stillFree = free.filter((name) => !busyAccounts.has(name));
+        // 弹窗停留期间的过期快照防护：确认前新变忙的账号在这里二次剔除（读模块真源：含详情页登记的忙碌）
+        const stillFree = free.filter((name) => !busyAccountsRef.has(name));
         if (stillFree.length === 0) {
             toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选账号都正在执行中' });
             return;

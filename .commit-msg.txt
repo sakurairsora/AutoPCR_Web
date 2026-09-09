@@ -1,6 +1,17 @@
-fix: 第八轮自查——第七轮 commit 复审两处小修
+fix: 第九轮审计修复——详情页清理入互斥网 + 回滚守卫 token 化 + Multi 回滚闭包
 
-- useConfigState 死参数 transform 删除：两个调用点（Bool/SingleSelect）均无映射需求，
-  留着会诱惑将来误用——误用正好踩中回滚 setState(prev as T) 的类型空间错位
-- $account 清理结果 toast 移守卫前：结果告知（成功/警告/错误）与失败 toast 口径对称，
-  A 的清理结果无论用户切到哪都应被告知；守卫只挡页面状态写（cleanStatus/refresh）与结果窗
+P2-1 详情页清理游离在忙碌互斥网外（双向漏洞）：
+- $account.handleCleanDaily 入网：入口 busyAccountsRef.has 拒绝、通过即 add、finally delete
+  （同账号同接口长任务：详情页在跑主页不设防、主页在跑详情页不设防，两头都堵）
+- 连带：DashBoard resolveTargets/executeQuickAction 的互斥判定从 state 镜像换读模块真源——
+  否则详情页登记的忙碌对批量执行不可见，入网只堵了一半；UI 派生读法（转圈/按钮态）保留 state
+
+P3-1 ConfigMulti 回滚用闭包快照：
+- onRollbackDisplay 改用回调入参 prev（与 rollbackPayload 同款变换）：闭包 initialRef 在链式失败时
+  已被前笔乐观回写污染，会画出从未确认过的值；正确性不再寄生在父级回显纠正链上；死 ref 删除
+
+P3-2 同值连点 desync（认账：上轮推演只走了成功→成功链，漏了失败→成功链）：
+- 在途标记从「值比较」改 token 身份（{payload, token}）：primitive 同值两笔可区分
+- 回滚守卫升级为双重：父级值===本笔 payload 且在途标记是本笔 token——
+  同值后笔在途时第一笔失败跳过回滚（父级的值是后笔的乐观值，后笔自己收尾）
+- 链路复核：失败→成功终态全对齐（服务器=父级=UI=lastConfirmed=7）；双失败回滚到 O 亦正确

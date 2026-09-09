@@ -66,13 +66,14 @@ function useConfigSaveFlow(
     // 最后确认值（服务器已知的状态）：初始=加载值，每笔保存成功推进。失败回滚一律回到它——
     // 若回到「上一笔提交值」，链式失败时那个值可能从未持久化成功，UI 会停在服务器从未见过的值上
     const lastConfirmedRef = useRef(propValue);
-    // 在途乐观值（本组件发起、尚未落地的 payload）：用于区分「propValue 变化」是本组件乐观回显还是外部更新（导入/同步）。
-    // 外部更新=新的服务器真值，lastConfirmed 必须跟上，否则后续失败回滚会把父级写回外部更新前的旧值
-    const inflightPayloadRef = useRef<ConfigValue | null>(null);
+    // 在途乐观提交的身份标记（token=对象身份，不用值——primitive payload 同值两笔必须可区分）。
+    // 双用途：①effect 区分「本组件乐观回显」与「外部更新」（导入/同步），外部更新时 lastConfirmed 必须跟进；
+    // ②commit 各段「是不是自己」的判定（成功清标记/失败回滚守卫/失败清标记）
+    const inflightRef = useRef<{ payload: ConfigValue; token: object } | null>(null);
     useEffect(() => {
         // 回显判定用值比较而非「是否有在途」：有在途但 propValue 不等于在途 payload = 外部更新（导入/同步），也要跟进；
         // 只跳过「恰好等于在途 payload」的乐观回显。旧写法（有在途就一律跳过）会让慢网保存期间到达的外部值永不跟进
-        if (valueRef.current !== inflightPayloadRef.current && valueRef.current !== lastConfirmedRef.current) {
+        if (valueRef.current !== inflightRef.current?.payload && valueRef.current !== lastConfirmedRef.current) {
             lastConfirmedRef.current = valueRef.current;
         }
     }, [propValue]);
@@ -96,21 +97,23 @@ function useConfigSaveFlow(
             rollbackPayload?: (previous: ConfigValue) => ConfigValue;
         },
     ): Promise<boolean> => {
-        inflightPayloadRef.current = payload;
+        const token = {}; // 每笔唯一身份：同值两笔（blur 型控件无 dirty 检查）也能区分
+        inflightRef.current = { payload, token };
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
             lastConfirmedRef.current = payload; // 保存成功：推进最后确认值
-            if (inflightPayloadRef.current === payload) inflightPayloadRef.current = null; // 后笔在途时保留标记
+            if (inflightRef.current?.token === token) inflightRef.current = null; // 后笔在途时保留标记
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
             return true;
         } catch (err) {
-            // 仅当父级当前值仍等于本笔乐观值才回滚：在途期间可能有后笔提交覆盖（连点场景），
-            // 无脑回滚会把后笔的乐观值一并踩掉，即使后笔随后成功也会 UI/服务器永久 desync（与 Module.handleBulkSubStatus 同一守卫思路）。
+            // 回滚守卫（双重）：①父级当前值仍等于本笔 payload——在途期间可能有后笔提交覆盖，无脑回滚会把后笔乐观值踩掉；
+            // ②在途标记仍是本笔 token——同值后笔在途时父级的值虽等于 payload，但那是后笔的乐观值：
+            //   本笔失败应跳过回滚（后笔自己会收尾），否则会出现「服务器=7、UI=旧值、还弹过保存成功」的 desync。
             // 契约：消费方必须传 onConfigUpdate 且父级回显同一引用，否则失败时显示回滚也会被此守卫跳过
-            if (valueRef.current === payload) {
+            if (valueRef.current === payload && inflightRef.current?.token === token) {
                 const confirmed = lastConfirmedRef.current;
                 onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(confirmed) : confirmed);
                 if (mountedRef.current) {
@@ -118,7 +121,7 @@ function useConfigSaveFlow(
                 }
             }
             // 本笔结束：仅当在途标记仍是自己时清空（连点时后笔已覆盖标记，不能误清）
-            if (inflightPayloadRef.current === payload) inflightPayloadRef.current = null;
+            if (inflightRef.current?.token === token) inflightRef.current = null;
             if (mountedRef.current) {
                 toaster.create({ type: 'error', title: '保存失败', description: await getErrorDescription(err) });
             }
@@ -374,8 +377,6 @@ function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
     );
 
     const [groupValue, setGroupValue] = useState(initialStrArr);
-    const initialRef = useRef(initialStrArr);
-    initialRef.current = initialStrArr;
     const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
@@ -387,11 +388,11 @@ function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
         const intArr = newStrArr.map(Number);
         if (intArr.length > 0 && intArr.every((n) => !isNaN(n))) postValue = intArr;
 
-        // 乐观回写，失败经统一流回滚（回滚值做同样的 string[]→number[] 转换）
-        const rollback = initialRef.current;
+        // 乐观回写，失败经统一流回滚（显示与父级都必须用回调入参 prev=最后确认值：
+        // 闭包 initialRef 是点击时快照，链式失败时可能已被前笔乐观回写污染，画出从未确认过的值）
         setGroupValue(newStrArr);
         void commit(postValue, {
-            onRollbackDisplay: () => setGroupValue(rollback),
+            onRollbackDisplay: (prev) => setGroupValue(Array.isArray(prev) ? prev.map(String) : []),
             rollbackPayload: (prev) => {
                 const rb = Array.isArray(prev) ? prev.map(String) : [];
                 const ints = rb.map(Number);
