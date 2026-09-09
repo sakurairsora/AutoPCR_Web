@@ -197,9 +197,13 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
             }
 
             // Push to targets
-            // Sequentially to avoid overwhelming if many（仅空闲目标：见上方忙碌过滤）
+            // Sequentially to avoid overwhelming if many（PUT 前逐个复查忙碌：源配置拉取期间目标可能开始执行）
             for (const targetAccount of freeTargets) {
                  try {
+                     if (busyAccountsRef.has(targetAccount)) {
+                         failCount++;
+                         continue;
+                     }
                      if (Object.keys(mergedConfig).length > 0) {
                          await putAccountConfigs(targetAccount, mergedConfig);
                      }

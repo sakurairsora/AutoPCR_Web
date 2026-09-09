@@ -62,9 +62,11 @@ export function AccountInfo({
     // 批量清理的提示文案要在按下那一刻取最新显示名；登记只看账号原名
     const displayNameRef = useRef(displayName);
     displayNameRef.current = displayName;
-    // 忙碌状态与登记回调经 ref 取最新值，避免闭包过期
-    const busyRef = useRef(isBusy);
-    busyRef.current = isBusy;
+    // 忙碌状态与登记回调经 ref 取最新值，避免闭包过期。
+    // busyRef = 父级 busy ∨ 本地动作（导入/删除/清理）：本地置位经 localBusyRef，父级渲染回写不再把它洗掉
+    const localBusyRef = useRef(false);
+    const busyRef = useRef(isBusy || false);
+    busyRef.current = isBusy || localBusyRef.current;
     const onBusyRef = useRef(onBusyChange);
     onBusyRef.current = onBusyChange;
 
@@ -94,7 +96,7 @@ export function AccountInfo({
         }
         buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
-        busyRef.current = true; // 导入等本地动作同以 busyRef 为互斥源，这里对称置位
+        localBusyRef.current = true; // 清理等本地动作同以 busyRef 为互斥源（父级经 onBusyChange 登记真源）
         const nameForUi = displayNameRef.current || alias;
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
         try {
@@ -121,7 +123,7 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
-            busyRef.current = false;
+            localBusyRef.current = false;
         }
     };
 
@@ -146,7 +148,7 @@ export function AccountInfo({
         }
         // 删除在途同样登记忙碌：否则这几百 ms 里清理/导入/二次删除可并发发起，晚到的清理响应还会把已删账号写回成幽灵行
         onBusyRef.current?.(alias, true);
-        busyRef.current = true;
+        localBusyRef.current = true;
         delAccount(alias)
             .then((res) => {
                 toaster.create({ type: 'success', title: '删除账号成功', description: res });
@@ -160,7 +162,7 @@ export function AccountInfo({
                 });
             })
             .finally(() => {
-                busyRef.current = false;
+                localBusyRef.current = false;
                 onBusyRef.current?.(alias, false);
             });
     };
@@ -305,7 +307,7 @@ export function AccountInfo({
         }
         buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
-        busyRef.current = true; // 导入期间登记忙：批量动作跳过本账号（互斥对称）
+        localBusyRef.current = true; // 导入期间登记忙：批量动作跳过本账号（互斥对称）
         try {
             const rawCfg = await file.text();
             // 区服名单现查（弹窗版用 props 传入的 areas，流程本体在 accountShared.importConfigFile）
@@ -341,7 +343,7 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
-            busyRef.current = false;
+            localBusyRef.current = false;
         }
     };
 

@@ -91,6 +91,12 @@ export function DashBoard() {
         else busyAccountsRef.delete(name);
     };
     const quickActionsLoadedOnce = useRef(false);
+    // 卸载时清模块级忙碌表：登出/离开账号页后，在途动作的晚到 add 不再污染下一个会话
+    useEffect(() => {
+        return () => {
+            busyAccountsRef.clear();
+        };
+    }, []);
     useEffect(() => {
         // 首次挂载不回写：原值刚 load 出来，写了也是白写（隐私模式还会白弹"保存失败"）
         if (quickActionsLoadedOnce.current) {
@@ -223,11 +229,13 @@ export function DashBoard() {
         });
     };
 
-    /** 可勾选名单（排除 BATCH_RUNNER 虚拟账号）：全选判定与全选操作共用同一分母 */
-    const selectableNames = useMemo(
-        () => userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== BATCH_RUNNER) ?? [],
+    /** 可渲染/可勾选的账号对象（排除 BATCH_RUNNER 虚拟账号）：渲染循环直接 map 它，避免每卡 find 造成 O(n²) */
+    const selectableAccounts = useMemo(
+        () => userInfo?.accounts?.filter((acc) => acc.name !== BATCH_RUNNER) ?? [],
         [userInfo?.accounts],
     );
+    /** 可勾选名单（names）：全选判定与全选操作共用同一分母，自 selectableAccounts 派生（单一来源） */
+    const selectableNames = useMemo(() => selectableAccounts.map((acc) => acc.name), [selectableAccounts]);
     const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === selectableNames.length;
 
     /** 批量目标解析（唯一实现）：勾选 > 自动批次 > 全体（排除 BATCH_RUNNER），忙碌切分+提示；无可执行目标时返回 null */
@@ -764,9 +772,7 @@ export function DashBoard() {
                                     </Table.Row>
                                 ))
                             ) : (
-                                selectableNames.map((name) => {
-                                    const account = userInfo.accounts!.find((acc) => acc.name === name)!;
-                                    return (
+                                selectableAccounts.map((account) => (
                                     <AccountInfo
                                         key={account.name}
                                         account={account}
@@ -783,8 +789,7 @@ export function DashBoard() {
                                             NiceModal.show(ConfigSyncModal, { sourceAccount: a });
                                         }}
                                     />
-                                    );
-                                })
+                                ))
                             )}
                         </Table.Body>
                     </Table.Root>
@@ -811,9 +816,7 @@ export function DashBoard() {
                                 </Card.Root>
                             ))
                         ) : (
-                            selectableNames.map((name) => {
-                                const account = userInfo.accounts!.find((acc) => acc.name === name)!;
-                                return (
+                            selectableAccounts.map((account) => (
                                 <AccountInfo
                                     key={account.name}
                                     account={account}
@@ -830,8 +833,7 @@ export function DashBoard() {
                                         NiceModal.show(ConfigSyncModal, { sourceAccount: a });
                                     }}
                                 />
-                                );
-                            })
+                            ))
                         )}
                     </SimpleGrid>
                 </Box>

@@ -66,6 +66,14 @@ function useConfigSaveFlow(
     // 最后确认值（服务器已知的状态）：初始=加载值，每笔保存成功推进。失败回滚一律回到它——
     // 若回到「上一笔提交值」，链式失败时那个值可能从未持久化成功，UI 会停在服务器从未见过的值上
     const lastConfirmedRef = useRef(propValue);
+    // 在途乐观值（本组件发起、尚未落地的 payload）：用于区分「propValue 变化」是本组件乐观回显还是外部更新（导入/同步）。
+    // 外部更新=新的服务器真值，lastConfirmed 必须跟上，否则后续失败回滚会把父级写回外部更新前的旧值
+    const inflightPayloadRef = useRef<ConfigValue | null>(null);
+    useEffect(() => {
+        if (inflightPayloadRef.current === null && valueRef.current !== lastConfirmedRef.current) {
+            lastConfirmedRef.current = valueRef.current;
+        }
+    }, [propValue]);
     const onUpdateRef = useRef(onConfigUpdate);
     onUpdateRef.current = onConfigUpdate;
 
@@ -86,10 +94,12 @@ function useConfigSaveFlow(
             rollbackPayload?: (previous: ConfigValue) => ConfigValue;
         },
     ): Promise<boolean> => {
+        inflightPayloadRef.current = payload;
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
             lastConfirmedRef.current = payload; // 保存成功：推进最后确认值
+            if (inflightPayloadRef.current === payload) inflightPayloadRef.current = null; // 后笔在途时保留标记
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
@@ -105,6 +115,8 @@ function useConfigSaveFlow(
                     opts?.onRollbackDisplay?.(confirmed);
                 }
             }
+            // 本笔结束：仅当在途标记仍是自己时清空（连点时后笔已覆盖标记，不能误清）
+            if (inflightPayloadRef.current === payload) inflightPayloadRef.current = null;
             if (mountedRef.current) {
                 toaster.create({ type: 'error', title: '保存失败', description: await getErrorDescription(err) });
             }

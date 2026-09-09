@@ -302,6 +302,7 @@ export function resetNotifyWatcherState(): void {
     alarmSeenByAlias.clear();
     notifyInflight.clear();
     notifyTrailing.clear();
+    busyAccountsRef.clear(); // 登出/换登录者：忙碌互斥表同源清理，否则残留名单让同步弹窗误跳过同名账号
 }
 
 export function NotifyWatcher(): null {

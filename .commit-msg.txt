@@ -1,25 +1,10 @@
-fix: 第六轮审计修复（P1 换号晚到写 + P2 全部 + P3 八项）
+fix: 自审轮——修自己五、六轮引入/遗留的四处毛病
 
-P1：
-- $account 跨账号晚到写：accountRef 世代守卫——refreshAccountData/handleCleanDaily 的 await 后校验账号是否仍为当前账号，
-  A 的晚到响应不再覆盖 B 页状态；catch/finally 同守卫；换号重置 effect 补 cleanLoading=false（B 页按钮不继承 A 的转圈）
-
-P2：
-- useConfigSaveFlow 回滚目标改「最后确认值」：lastConfirmedRef 初始=加载值、成功推进；链式失败不再回滚到从未持久化成功的乐观值
-- 删除账号在途登记忙碌：互斥从单向变双向（清理/导入/删除全闭合）
-- importConfigFile 区服层形状校验：字符串/数组不再直通迭代成垃圾键；schema 外补充键只放行原始值
-- 卡片导入成功后 clearAreaConfigCache：详情页不再命中导入前旧缓存
-- 导出配置裸 getItem/JSON.parse → safeGetItem + try-catch 兜空表
-- 通知关闭→开启时清空 alarmSeenByAlias：关闭期间错过的全绿不再吞掉重开后的新警报
-- 配置同步参与忙碌互斥：busyAccountsRef 模块级真源（setAccountBusy 同步写），handleSync 过滤忙碌目标
-
-P3：
-- isTableView 读侧迁移 safeGetItem+VIEW_MODE_KEY（与写侧同键同通道）
-- Picker 拉取失败与合法空列表分流：fetchFailed 独立标记，空列表可确认（移除旧按钮唯一途径）
-- 改名 safeSetItem 失败提示（返回布尔）；handleDailyResult 提示用显示名口径
-- resetNotifyWatcherState 加世代计数：登出后在途响应晚到不回写（401 路径待 axios 层覆盖，暂记录）
-- toCheckedConfigItem：time 验范围（99:99 拒）、int 拒小数
-- BATCH_RUNNER 魔法字符串 13 处收口为常量（5 文件）；handle 注册表更名 dailyCleanRegistry
-- quickActions load 白名单式重建（未知属性不透传）
-- 用户裁决存档：弹结果两开关各自独立、每账号自己算自己的——Module.tsx 只查账号级标记是正确行为，不叠加总开关
-  （putUserInfo 死导入为审计误报：改密码功能在用，再次证伪）
+- O(n²) 渲染：第五轮 BATCH_RUNNER 过滤改的 map+find 每卡全表扫 → selectableAccounts useMemo（对象级）一次过滤，
+  selectableNames 自它派生，两处渲染循环直接 map 对象
+- busyRef 渲染覆写窗口：本地置 true 会被「置位后到父级重渲染前」的任意渲染洗回 false（导入/删除/清理三处都有）
+  → 拆 localBusyRef，busyRef = 父级 isBusy ∨ localBusyRef（派生式，不再被洗）
+- busyAccountsRef 登出残留：resetNotifyWatcherState 同步清 + DashBoard 卸载兜底清（防在途晚到 add 污染下一会话）
+- lastConfirmedRef 外部刷新盲区：导入/同步改了配置后，失败回滚会把父级写回外部更新前的旧值
+  → inflightPayloadRef 区分本组件乐观回显与外部更新，外部更新时 lastConfirmed 跟进（连点用身份校验防误清）
+- ConfigSyncModal PUT 前逐个复查忙碌（源配置拉取是多个 await，过滤快照会过期）
