@@ -141,12 +141,13 @@ function AccountComponent() {
         try {
             const res = await postAccountAreaDaily(a);
             void emitDailyFinished(a);
+            // 全局副作用放守卫前：A 清理成功这个事实与「用户切到哪」无关，不因切号丢失
+            sessionStorage.setItem('autopcr_need_refresh_dashboard', '1');
             if (accountRef.current !== a) return; // 换号了：晚到结果不写新页面（loading 由重置 effect 兜底）
             const resAny = res as { daily_clean_time?: { status?: string } | null; status?: string } | undefined;
             const st = resAny?.daily_clean_time?.status || resAny?.status || '';
 
             setCleanStatus(st);
-            sessionStorage.setItem('autopcr_need_refresh_dashboard', '1');
             await refreshAccountData();
 
             if (st === '错误') {
@@ -156,13 +157,15 @@ function AccountComponent() {
             } else {
                 toaster.create({ type: 'success', title: `${nameForUi}清日常成功` });
             }
-            if (popupOn) {
+            if (popupOn && accountRef.current === a) { // 换号后不弹：A 的结果窗不盖在 B 页上（审计六 P2-1）
                 getAccountDailyResultList(a)
                     .then((resList) => {
+                        if (accountRef.current !== a) return; // 结果列表在途时切号：同样丢弃
                         // modal 关闭路径的 reject 不是拉取失败，单独吞掉
                         void NiceModal.show(ResultInfoModal, { alias: a, title: '日常', resultInfo: resList }).catch(() => {});
                     })
                     .catch(() => {
+                        if (accountRef.current !== a) return;
                         toaster.create({ type: 'warning', title: '结果获取失败', description: '无法拉取本次日常结果' });
                     });
             }
@@ -270,7 +273,10 @@ function AccountComponent() {
                             onCheckedChange={(details) => {
                                 const next = !!details.checked;
                                 setPopupOn(next);
-                                safeSetItem(POPUP_FLAG_KEY(account), next ? 'true' : 'false');
+                                if (!safeSetItem(POPUP_FLAG_KEY(account), next ? 'true' : 'false')) {
+                                    // 静默吞掉的话勾选不保留且无任何提示（与改名保存失败同等待遇）
+                                    toaster.create({ type: 'warning', title: '弹结果设置保存失败', description: '本地存储不可用，本次修改不会保留' });
+                                }
                             }}
                             colorPalette="blue"
                             size="md"

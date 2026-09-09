@@ -376,6 +376,7 @@ export function AccountInfo({
                     colorPalette="orange"
                     onClick={handleCleanDaily}
                     loading={buttonLoading.open}
+                    disabled={isBusy}
                 >
                     <FiTarget />
                 </IconButton>
@@ -390,6 +391,7 @@ export function AccountInfo({
                     colorPalette="blue"
                     onClick={() => importFileRef.current?.click()}
                     loading={buttonLoading.open}
+                    disabled={isBusy}
                 >
                     <FiUpload />
                 </IconButton>
@@ -404,6 +406,7 @@ export function AccountInfo({
                     colorPalette="teal"
                     onClick={() => onOpenSyncConfig && onOpenSyncConfig(alias)}
                     loading={buttonLoading.open}
+                    disabled={isBusy}
                 >
                     <FiCopy />
                 </IconButton>
@@ -418,6 +421,7 @@ export function AccountInfo({
                     colorPalette="green"
                     onClick={handleDailyResult}
                     loading={buttonLoading.open}
+                    disabled={isBusy}
                 >
                     <FiActivity />
                 </IconButton>

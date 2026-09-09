@@ -20,7 +20,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Field } from '../../components/ui/field';
 import { putAccount } from '@/api/Account';
 import { getErrorDescription } from './Config';
-import { BATCH_RUNNER } from './accountShared';
+import { BATCH_RUNNER, getDisplayName } from './accountShared';
 import { toaster } from '../../components/ui/toaster';
 
 interface InfoProps {
@@ -37,7 +37,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
     const alias = accountInfo?.alias || '';
     const displayName =
         alias && alias !== BATCH_RUNNER
-            ? (localStorage.getItem(`autopcr_displayName_${alias}`) || alias)
+            ? getDisplayName(alias) // safe 封装：渲染期裸读 localStorage 在隐私模式会抛 SecurityError 白屏
             : alias;
 
     const [username, setUsername] = useState<string>(accountInfo?.username);
@@ -133,7 +133,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
                 <Heading size="lg" fontWeight="bold" letterSpacing="tight">
                     {alias === BATCH_RUNNER ? '批量运行配置' : displayName}
                 </Heading>
-                {accountInfo?.alias !== 'BATCH_RUNNER' && (
+                {accountInfo?.alias !== BATCH_RUNNER && (
                     <Text fontSize="sm" color="fg.muted">
                         基础信息配置
                     </Text>

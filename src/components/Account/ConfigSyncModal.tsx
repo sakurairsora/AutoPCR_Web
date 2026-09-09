@@ -25,6 +25,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
 import { getErrorDescription } from './Config';
 import { busyAccountsRef, BATCH_RUNNER } from './accountShared';
+import { clearAreaConfigCache } from './Area';
 
 interface ConfigSyncModalProps {
     sourceAccount: string;
@@ -198,14 +199,17 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
 
             // Push to targets
             // Sequentially to avoid overwhelming if many（PUT 前逐个复查忙碌：源配置拉取期间目标可能开始执行）
+            let skipCount = 0;
             for (const targetAccount of freeTargets) {
                  try {
                      if (busyAccountsRef.has(targetAccount)) {
-                         failCount++;
+                         skipCount++; // 忙碌=跳过不是失败：与入口预过滤同一口径，不谎报失败让用户白排查
                          continue;
                      }
                      if (Object.keys(mergedConfig).length > 0) {
                          await putAccountConfigs(targetAccount, mergedConfig);
+                         // 失效目标账号的 Area 配置缓存：详情页/Picker 不再显示同步前旧值、不再以旧值回写冲掉刚同步的配置
+                         clearAreaConfigCache(targetAccount);
                      }
                      successCount++;
                  } catch (e) {
@@ -215,10 +219,11 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
             }
             
             if (failCount === 0) {
-                toaster.create({ type: 'success', title: `成功同步到 ${successCount} 个账号` });
+                const skipNote = skipCount > 0 ? `，跳过(执行中): ${skipCount}` : '';
+                toaster.create({ type: 'success', title: `成功同步到 ${successCount} 个账号${skipNote}` });
                 modal.hide();
             } else {
-                toaster.create({ type: 'warning', title: `同步部分完成`, description: `成功: ${successCount}, 失败: ${failCount}` });
+                toaster.create({ type: 'warning', title: `同步部分完成`, description: `成功: ${successCount}, 失败: ${failCount}${skipCount > 0 ? `, 跳过: ${skipCount}` : ''}` });
             }
 
         } catch (err: any) {

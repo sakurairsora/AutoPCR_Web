@@ -70,7 +70,9 @@ function useConfigSaveFlow(
     // 外部更新=新的服务器真值，lastConfirmed 必须跟上，否则后续失败回滚会把父级写回外部更新前的旧值
     const inflightPayloadRef = useRef<ConfigValue | null>(null);
     useEffect(() => {
-        if (inflightPayloadRef.current === null && valueRef.current !== lastConfirmedRef.current) {
+        // 回显判定用值比较而非「是否有在途」：有在途但 propValue 不等于在途 payload = 外部更新（导入/同步），也要跟进；
+        // 只跳过「恰好等于在途 payload」的乐观回显。旧写法（有在途就一律跳过）会让慢网保存期间到达的外部值永不跟进
+        if (valueRef.current !== inflightPayloadRef.current && valueRef.current !== lastConfirmedRef.current) {
             lastConfirmedRef.current = valueRef.current;
         }
     }, [propValue]);
@@ -145,7 +147,9 @@ function useConfigState<T>(
     const save = async (newValue: T): Promise<void> => {
         setState(newValue);
         const payload = transform ? transform(newValue) : (newValue as ConfigValue);
-        await commit(payload, { onRollbackDisplay: () => setState(propValue) });
+        // 必须用回调入参 prev（最后确认值）：闭包 propValue 是渲染时快照，链式失败时可能已是别的值——
+        // 回滚显示错值正是 lastConfirmedRef 要消灭的 desync 显示态版本
+        await commit(payload, { onRollbackDisplay: (prev) => setState(prev as T) });
     };
 
     return [state, setState, save] as const;

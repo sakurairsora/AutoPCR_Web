@@ -125,6 +125,8 @@ export default function Area({ alias, keys: key, areaName, showOnlyFav = false }
     }, [alias, key, retryTick]);
 
     const handleConfigUpdate = useCallback((configKey: string, value: ConfigValue) => {
+        // 契约（Config.useConfigSaveFlow 失败回滚守卫依赖）：value 必须原引用透传，不可深拷贝——
+        // 数组值（Multi/MultiSearch）的「父级值仍等于本笔乐观值」守卫用引用比较，拷贝即恒假
         setState((prev) => {
             if (!prev.config) return prev;
             const nextConfig: ModuleResponse = {

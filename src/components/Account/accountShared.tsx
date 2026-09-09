@@ -302,7 +302,7 @@ export function resetNotifyWatcherState(): void {
     alarmSeenByAlias.clear();
     notifyInflight.clear();
     notifyTrailing.clear();
-    busyAccountsRef.clear(); // 登出/换登录者：忙碌互斥表同源清理，否则残留名单让同步弹窗误跳过同名账号
+    // busyAccountsRef 不在此清（用户裁决）：忙碌是账号级行为，跨导航/登录存活，晚到 finally 自会 delete
 }
 
 export function NotifyWatcher(): null {
@@ -310,6 +310,8 @@ export function NotifyWatcher(): null {
     // 否则关闭期间错过的全绿丢失，重开后的新警报被旧 seen 标记吞掉
     const lastNotifyEnabledRef = useRef<boolean | null>(null);
     useEffect(() => {
+        // 挂载即重置：跨登录 seen 污染无条件闭合（401 会话过期无论走硬跳还是软导航，重挂载都发生在新会话）
+        resetNotifyWatcherState();
         const check = (alias: string, prefsMuted: string[]) => {
             const gen = notifyGeneration; // 捕获世代：resetNotifyWatcherState 后本 check 的结果作废
             void (async () => {
@@ -349,13 +351,16 @@ export function NotifyWatcher(): null {
                 } catch {
                     // 拉取失败静默：下次事件再来
                 } finally {
-                    notifyInflight.delete(alias);
-                    // 拉取期间又来了事件：补查一次，新警报不用等下一次日常才被发现（补查同样登记 inflight，保持并发防护闭合）
-                    if (notifyTrailing.delete(alias)) {
-                        const prefs = loadNotifyPrefs();
-                        if (prefs.enabled) {
-                            notifyInflight.add(alias);
-                            check(alias, prefs.muted);
+                    // 世代闸罩住 finally：reset 后晚到的请求不得删新世代的 inflight 登记（否则窗口内同账号重复 GET、trailing 防护失效）
+                    if (notifyGeneration === gen) {
+                        notifyInflight.delete(alias);
+                        // 拉取期间又来了事件：补查一次，新警报不用等下一次日常才被发现（补查同样登记 inflight，保持并发防护闭合）
+                        if (notifyTrailing.delete(alias)) {
+                            const prefs = loadNotifyPrefs();
+                            if (prefs.enabled) {
+                                notifyInflight.add(alias);
+                                check(alias, prefs.muted);
+                            }
                         }
                     }
                 }
@@ -467,22 +472,25 @@ export function toCheckedConfigItem(
 export function realImportByModule(
     module: ModuleResponse,
     configs: Record<string, ConfigValue>,
-): Record<string, ConfigValue> {
-    const uploadConfig: Record<string, ConfigValue> = {};
+): { accepted: Record<string, ConfigValue>; schemaKeys: Set<string> } {
+    const accepted: Record<string, ConfigValue> = {};
+    const schemaKeys = new Set<string>(); // schema 实际接管的键：含被校验拒绝的（拒绝值不得经补充键复活）
     for (const moduleKey in module.info) {
+        schemaKeys.add(moduleKey); // 开关键也属 schema：布尔特判拒掉的字符串 "true" 不再从补充键溜回来
         if (configs[moduleKey] !== undefined && typeof configs[moduleKey] === 'boolean') {
-            uploadConfig[moduleKey] = configs[moduleKey];
+            accepted[moduleKey] = configs[moduleKey];
         }
         const moduleConf = module.info[moduleKey].config;
         for (const moduleConfKey in moduleConf) {
+            schemaKeys.add(moduleConfKey);
             const moduleItem = moduleConf[moduleConfKey];
             const confItem = toCheckedConfigItem(moduleItem.config_type, moduleItem.candidates, configs[moduleConfKey]);
             if (confItem !== undefined) {
-                uploadConfig[moduleConfKey] = confItem;
+                accepted[moduleConfKey] = confItem;
             }
         }
     }
-    return uploadConfig;
+    return { accepted, schemaKeys };
 }
 
 /** 配置文件导入共享流程：解析 base64 → 逐区服 schema 校验 → PUT → 成功后写收藏标记。
@@ -517,16 +525,19 @@ export async function importConfigFile(opts: {
         // 区服层形状守卫：字符串/数组是真值，直接迭代会把 "abc" 拆成 "0"/"1"/"2" 垃圾键直通 PUT
         if (typeof areaConfig !== 'object' || areaConfig === null || Array.isArray(areaConfig)) return;
 
-        Object.assign(uploadConfig, realImportByModule(value, areaConfig));
+        const { accepted, schemaKeys } = realImportByModule(value, areaConfig);
+        Object.assign(uploadConfig, accepted);
 
-        // 收藏标记 + schema 外补充键（补充键只放行原始值：对象/数组不属于配置值，防垃圾直传）
+        // 收藏标记 + schema 外补充键。schemaKeys = schema 实际接管的键（含被校验拒绝的）：
+        // 被拒的非法值（"99:99"、1.5、字符串 "true"）不得经补充键复活直通 PUT；
+        // 真正的 schema 外补充键只放行原始值（对象/数组不属于配置值）
         for (const key in areaConfig) {
             if (key.startsWith('_fav_')) {
                 importedFav[areaKey] = importedFav[areaKey] || [];
                 if (areaConfig[key] === true) {
                     importedFav[areaKey].push(key.slice(5));
                 }
-            } else if (uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
+            } else if (!schemaKeys.has(key) && uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
                 const v = areaConfig[key];
                 if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
                     uploadConfig[key] = v;

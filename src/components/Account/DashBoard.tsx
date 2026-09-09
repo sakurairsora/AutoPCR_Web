@@ -91,12 +91,6 @@ export function DashBoard() {
         else busyAccountsRef.delete(name);
     };
     const quickActionsLoadedOnce = useRef(false);
-    // 卸载时清模块级忙碌表：登出/离开账号页后，在途动作的晚到 add 不再污染下一个会话
-    useEffect(() => {
-        return () => {
-            busyAccountsRef.clear();
-        };
-    }, []);
     useEffect(() => {
         // 首次挂载不回写：原值刚 load 出来，写了也是白写（隐私模式还会白弹"保存失败"）
         if (quickActionsLoadedOnce.current) {

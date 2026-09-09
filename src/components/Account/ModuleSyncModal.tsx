@@ -21,7 +21,7 @@ import { useEffect, useState } from 'react';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
 import { getErrorDescription } from './Config';
-import { BATCH_RUNNER } from './accountShared';
+import { BATCH_RUNNER, busyAccountsRef } from './accountShared';
 
 interface ModuleSyncModalProps {
     sourceAlias: string;
@@ -74,7 +74,17 @@ export default NiceModal.create(({ sourceAlias, moduleName }: ModuleSyncModalPro
             toaster.create({ type: 'warning', title: '请选择至少一个目标账号' });
             return;
         }
-        modal.resolve(selectedTargets);
+        // 忙碌目标过滤：与配置同步弹窗同口径（目标正在执行时同步 PUT 会并发打后端）
+        const busyTargets = selectedTargets.filter((t) => busyAccountsRef.has(t));
+        const freeTargets = selectedTargets.filter((t) => !busyAccountsRef.has(t));
+        if (freeTargets.length === 0) {
+            toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选目标账号都正在执行中' });
+            return;
+        }
+        if (busyTargets.length > 0) {
+            toaster.create({ type: 'info', title: `模块同步：已跳过 ${busyTargets.length} 个正在执行中的账号` });
+        }
+        modal.resolve(freeTargets);
         modal.hide();
     };
 
