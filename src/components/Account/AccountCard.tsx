@@ -14,7 +14,7 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { dailyCleanRegistry as handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, importConfigFile } from './accountShared';
+import { dailyCleanRegistry as handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, importConfigFile, busyAccountsRef } from './accountShared';
 import { clearAreaConfigCache } from './Area';
 import { RoundCheckbox, AccountTags, StatusTag } from './AccountCardParts';
 interface AccountInfoProps {
@@ -90,7 +90,8 @@ export function AccountInfo({
     }, [alias, isEditingName]);
 
     const handleCleanDaily = async () => {
-        if (busyRef.current) {
+        // 守卫读真源（含详情页登记的忙碌）：镜像 busyRef 只反映父级 state+本卡 local，跨页直写看不见
+        if (busyAccountsRef.has(alias)) {
             toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
             return;
         }
@@ -141,8 +142,8 @@ export function AccountInfo({
     }, [alias]);
 
     const handleDeleteAccount = () => {
-        // 忙碌互斥：执行中账号不可删（结果未回，删了也会留下悬挂状态）
-        if (busyRef.current) {
+        // 忙碌互斥：执行中账号不可删（结果未回，删了也会留下悬挂状态）。守卫读真源（含详情页登记）
+        if (busyAccountsRef.has(alias)) {
             toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
             return;
         }
@@ -300,8 +301,8 @@ export function AccountInfo({
         event.target.value = '';
         if (!file) return;
 
-        // 忙碌互斥：该账号正有动作（清理/快捷执行）时拒绝导入，防两个写操作并发打后端
-        if (busyRef.current) {
+        // 忙碌互斥：该账号正有动作（清理/快捷执行/详情页清理）时拒绝导入，防两个写操作并发打后端。守卫读真源
+        if (busyAccountsRef.has(alias)) {
             toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
             return;
         }

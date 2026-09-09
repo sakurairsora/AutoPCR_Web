@@ -12,7 +12,7 @@ import NiceModal from '@ebay/nice-modal-react';
 import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag, favKey, safeGetItem, DANGEROUS_AREA_NAME } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem, DANGEROUS_AREA_NAME, busyAccountsRef } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -128,6 +128,12 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
     };
 
     const handleExecute = () => {
+        // 忙碌互斥第七条路径：单模块执行与清理/批量是同一族长任务，在途时其它写路径必须被拒
+        if (busyAccountsRef.has(alias)) {
+            toaster.create({ type: 'warning', title: '该账号正在执行中', description: '请等待当前操作完成' });
+            return;
+        }
+        busyAccountsRef.add(alias);
         toaster.create({ type: 'info', title: '开始执行' + info?.name + "..." });
         onOpen();
         postAccountAreaSingle(alias, info?.key).then(async (res) => {
@@ -141,6 +147,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             toaster.create({ type: 'error', title: '执行失败', description: await getErrorDescription(err) });
         }).finally(() => {
             onClose();
+            busyAccountsRef.delete(alias); // 本笔是唯一登记作者（入口已互斥），直接清
         });
     }
 

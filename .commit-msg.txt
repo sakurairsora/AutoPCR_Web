@@ -1,17 +1,7 @@
-fix: 第九轮审计修复——详情页清理入互斥网 + 回滚守卫 token 化 + Multi 回滚闭包
+fix: 第十轮自查——互斥网读法统一收尾 + Module 执行入网
 
-P2-1 详情页清理游离在忙碌互斥网外（双向漏洞）：
-- $account.handleCleanDaily 入网：入口 busyAccountsRef.has 拒绝、通过即 add、finally delete
-  （同账号同接口长任务：详情页在跑主页不设防、主页在跑详情页不设防，两头都堵）
-- 连带：DashBoard resolveTargets/executeQuickAction 的互斥判定从 state 镜像换读模块真源——
-  否则详情页登记的忙碌对批量执行不可见，入网只堵了一半；UI 派生读法（转圈/按钮态）保留 state
-
-P3-1 ConfigMulti 回滚用闭包快照：
-- onRollbackDisplay 改用回调入参 prev（与 rollbackPayload 同款变换）：闭包 initialRef 在链式失败时
-  已被前笔乐观回写污染，会画出从未确认过的值；正确性不再寄生在父级回显纠正链上；死 ref 删除
-
-P3-2 同值连点 desync（认账：上轮推演只走了成功→成功链，漏了失败→成功链）：
-- 在途标记从「值比较」改 token 身份（{payload, token}）：primitive 同值两笔可区分
-- 回滚守卫升级为双重：父级值===本笔 payload 且在途标记是本笔 token——
-  同值后笔在途时第一笔失败跳过回滚（父级的值是后笔的乐观值，后笔自己收尾）
-- 链路复核：失败→成功终态全对齐（服务器=父级=UI=lastConfirmed=7）；双失败回滚到 O 亦正确
+- 卡片三入口（清理/删除/导入）守卫从镜像 busyRef 换读真源 busyAccountsRef：上轮详情页入网
+  只堵了「主页在跑、详情页设防」方向，反向（详情页在跑、卡片不设防）漏着——镜像看不见跨页直写
+- 详情页清理守卫提到置 loading 前：拒绝路径不碰页面状态（原来先 setCleanLoading(true) 再拒绝再手动回滚）
+- Module.handleExecute（单模块执行）入互斥网：第七条游离路径，与详情页清理同性质（入口拒/add/finally delete）
+- 批量删号 confirm 列出忙碌账号：删除本身是终止性操作不入互斥网，但在途操作结果会丢，至少告知

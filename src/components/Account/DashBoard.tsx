@@ -644,7 +644,10 @@ export function DashBoard() {
                                 colorPalette="red"
                                 onClick={() => {
                                     if (selectedAccounts.length > 0) {
-                                        if (window.confirm(`确定删除选中的 ${selectedAccounts.length} 个账号吗？`)) {
+                                        // 忙碌账号提示：正执行的账号被删，在途响应会落空（写路径互斥网不拦删除本身——删除是终止性操作，但至少告知）
+                                        const busyDel = selectedAccounts.filter((name) => busyAccountsRef.has(name));
+                                        const busyNote = busyDel.length > 0 ? `\n其中正在执行中的账号：${busyDel.join('、')}\n（删除后这些操作的结果将丢失）` : '';
+                                        if (window.confirm(`确定删除选中的 ${selectedAccounts.length} 个账号吗？${busyNote}`)) {
                                             Promise.all(selectedAccounts.map((name) => delAccount(name)))
                                                 .then(() => {
                                                     toaster.create({ type: 'success', title: '删除成功' });

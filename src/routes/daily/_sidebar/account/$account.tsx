@@ -134,15 +134,15 @@ function AccountComponent() {
         const a = accountInfo?.alias || account;
         const nameForUi = getDisplayName(a);
 
-        setCleanLoading(true);
-        setCleanStatus('');
         // 忙碌互斥第六条路径：详情页清理与卡片清理是同一个长任务接口，双向都要设防——
-        // 主页批量/同步把该账号当目标、或该账号已在主页执行中，这里在途时另一侧必须被拒（点击时点互斥）
+        // 主页批量/同步把该账号当目标、或该账号已在主页执行中，这里在途时另一侧必须被拒（点击时点互斥）。
+        // 守卫放在置 loading 前：拒绝路径不碰页面状态
         if (busyAccountsRef.has(a)) {
             toaster.create({ type: 'warning', title: `${nameForUi}正在执行中`, description: '请等待当前操作完成' });
-            setCleanLoading(false);
             return;
         }
+        setCleanLoading(true);
+        setCleanStatus('');
         busyAccountsRef.add(a);
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
 
