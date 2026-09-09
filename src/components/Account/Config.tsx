@@ -44,31 +44,10 @@ export function enqueueConfigSave<T>(alias: string, task: () => Promise<T>): Pro
     return next;
 }
 
-/** 安全解析后端错误文案，避免 Blob/.text 抛错或 [object Object] */
-export async function getErrorDescription(err: unknown, fallback = '网络错误'): Promise<string> {
-    const data = (err as { response?: { data?: unknown } })?.response?.data;
-    try {
-        if (data == null) {
-            if (err instanceof Error && err.message) return err.message;
-            return fallback;
-        }
-        if (typeof Blob !== 'undefined' && data instanceof Blob) {
-            const t = await data.text();
-            return t || fallback;
-        }
-        if (typeof data === 'string') return data || fallback;
-        if (typeof data === 'object') {
-            try {
-                return JSON.stringify(data);
-            } catch {
-                return fallback;
-            }
-        }
-        return String(data);
-    } catch {
-        return fallback;
-    }
-}
+// 通用错误工具已迁至 accountShared；此处 import 供本文件用并 re-export 兼容既有引用
+import { getErrorDescription } from './accountShared';
+export { getErrorDescription };
+
 
 const ROW_H = '2.25rem';
 const SINGLE_SEARCH_THRESHOLD = 30;
@@ -122,7 +101,7 @@ function useConfigSaveFlow(
         }
     };
 
-    return { commit, valueRef };
+    return { commit };
 }
 
 
@@ -511,20 +490,11 @@ function ConfigText({ alias, value, info, onConfigUpdate }: ConfigProps) {
 
 function ConfigMultiSearch({ alias, value, info, onConfigUpdate }: ConfigProps) {
     const [localValue, setLocalValue] = useState<ConfigValue>(value);
-    const mountedRef = useRef(true);
-    const onUpdateRef = useRef(onConfigUpdate);
-    onUpdateRef.current = onConfigUpdate;
+    const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
         setLocalValue(value);
     }, [value]);
-
-    useEffect(() => {
-        mountedRef.current = true;
-        return () => {
-            mountedRef.current = false;
-        };
-    }, []);
 
     const displayValue = ((localValue || []) as number[]).map((id) => {
         const unit = info.candidates.find((u) => u.value === id);
@@ -543,22 +513,12 @@ function ConfigMultiSearch({ alias, value, info, onConfigUpdate }: ConfigProps) 
 
             // show 关闭后已 resolve，成功路径不要再 hide，否则可能进 catch 误回滚
             setLocalValue(ret);
-            onUpdateRef.current?.(info.key, ret);
-            const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, info.key, ret));
-            if (mountedRef.current) {
-                toaster.create({ type: 'success', title: '保存成功', description: res });
-            }
+            await commit(ret, { onRollbackDisplay: (prev) => setLocalValue(prev) });
         } catch (err) {
-            onUpdateRef.current?.(info.key, previousValue);
+            // NiceModal.show 本身的异常（如组件崩溃）：恢复显示
+            setLocalValue(previousValue);
             try { await NiceModal.hide(multiSelectModal); } catch { /* ignore */ }
-            if (mountedRef.current) {
-                setLocalValue(previousValue);
-                toaster.create({
-                    type: 'error',
-                    title: '保存失败',
-                    description: await getErrorDescription(err),
-                });
-            }
+            toaster.create({ type: 'error', title: '打开选择器失败', description: await getErrorDescription(err) });
         }
     };
 

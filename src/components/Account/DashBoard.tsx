@@ -87,18 +87,28 @@ export function DashBoard() {
             return next;
         });
     };
+    const quickActionsLoadedOnce = useRef(false);
     useEffect(() => {
-        if (!saveQuickActions(quickActions)) {
-            toaster.create({ type: 'warning', title: '自定义按钮保存失败', description: '本地存储不可用，本次会话内仍可使用' });
+        // 首次挂载不回写：原值刚 load 出来，写了也是白写（隐私模式还会白弹"保存失败"）
+        if (quickActionsLoadedOnce.current) {
+            if (!saveQuickActions(quickActions)) {
+                toaster.create({ type: 'warning', title: '自定义按钮保存失败', description: '本地存储不可用，本次会话内仍可使用' });
+            }
+        } else {
+            quickActionsLoadedOnce.current = true;
         }
     }, [quickActions]);
 
+    const batchLoadedOnce = useRef(false);
     useEffect(() => {
-        saveBatch(batchAccounts);
+        if (batchLoadedOnce.current) saveBatch(batchAccounts);
+        else batchLoadedOnce.current = true;
     }, [batchAccounts]);
 
+    const popupLoadedOnce = useRef(false);
     useEffect(() => {
-        safeSetItem(POPUP_MASTER_KEY, popupResult ? 'true' : 'false');
+        if (popupLoadedOnce.current) safeSetItem(POPUP_MASTER_KEY, popupResult ? 'true' : 'false');
+        else popupLoadedOnce.current = true;
     }, [popupResult]);
 
     // 批次名单随账号列表自动剔除失效项（依赖名单序列化：删一加一 length 不变也能触发）
@@ -207,11 +217,16 @@ export function DashBoard() {
         });
     };
 
-    const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === (userInfo?.accounts?.length ?? 0);
+    /** 可勾选名单（排除 BATCH_RUNNER 虚拟账号）：全选判定与全选操作共用同一分母 */
+    const selectableNames = useMemo(
+        () => userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [],
+        [userInfo?.accounts],
+    );
+    const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === selectableNames.length;
 
     /** 批量目标解析（唯一实现）：勾选 > 自动批次 > 全体（排除 BATCH_RUNNER），忙碌切分+提示；无可执行目标时返回 null */
     const resolveTargets = (actionName: string): { free: string[]; targetDesc: string } | null => {
-        const allNames = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
+        const allNames = selectableNames;
         const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyRef.current.has(name));
@@ -257,14 +272,26 @@ export function DashBoard() {
     };
 
     const executeQuickAction = async (btn: QuickActionItem, free: string[], targetDesc: string) => {
-        free.forEach((name) => {
+        // 弹窗停留期间的过期快照防护：确认前新变忙的账号在这里二次剔除
+        const stillFree = free.filter((name) => !busyAccounts.has(name));
+        if (stillFree.length === 0) {
+            toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选账号都正在执行中' });
+            return;
+        }
+        if (stillFree.length < free.length) {
+            toaster.create({ type: 'info', title: `${btn.name}：已跳过 ${free.length - stillFree.length} 个确认期间开始执行的账号` });
+        }
+        stillFree.forEach((name) => {
             setAccountBusy(name, true);
         });
         let ok = 0;
         let fail = 0;
         const outcomes = new Map<string, { ok: boolean; detail: string; res?: ResultInfo[] }>();
-        await Promise.all(
-            free.map(async (name) => {
+        // 执行限并发 3 路：写操作对服务器部署的后端更重，不能像本地那样全量并打
+        let execCursor = 0;
+        const execWorker = async () => {
+            while (execCursor < stillFree.length) {
+                const name = stillFree[execCursor++];
                 try {
                     const res = await postAccountAreaSingle(name, btn.key);
                     outcomes.set(name, { ok: true, detail: '', res });
@@ -275,12 +302,13 @@ export function DashBoard() {
                 } finally {
                     setAccountBusy(name, false);
                 }
-            }),
-        );
-        // 单账号 + 该账号开了弹结果：只弹详情窗，不叠汇总窗
-        const singleDetail = free.length === 1 && loadPopupFlag(free[0]) && outcomes.get(free[0])?.ok && outcomes.get(free[0])?.res;
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(3, stillFree.length) }, execWorker));
+        // 单账号 + 弹结果总开关开 + 该账号开了弹结果标记：只弹详情窗，不叠汇总窗（总开关关=只 toast，详情窗也不弹）
+        const singleDetail = popupResult && stillFree.length === 1 && loadPopupFlag(stillFree[0]) && outcomes.get(stillFree[0])?.ok && outcomes.get(stillFree[0])?.res;
         if (popupResult && !singleDetail) {
-            const rows: ResultSummaryRow[] = free.map((name) => {
+            const rows: ResultSummaryRow[] = stillFree.map((name) => {
                 const o = outcomes.get(name);
                 return { alias: name, name: getDisplayName(name), status: o?.ok ? '成功' : '失败', detail: o?.ok ? undefined : o?.detail };
             });
@@ -328,11 +356,10 @@ export function DashBoard() {
 
     const toggleSelectAll = () => {
         // 全选集合排除 BATCH_RUNNER 虚拟账号：勾进去会在批量执行时直打后端
-        const selectable = userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [];
-        if (selectedAccounts.length === selectable.length) {
+        if (selectedAccounts.length === selectableNames.length) {
             setSelectedAccounts([]);
         } else {
-            setSelectedAccounts(selectable);
+            setSelectedAccounts(selectableNames);
         }
     };
 

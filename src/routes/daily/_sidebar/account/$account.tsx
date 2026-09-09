@@ -120,8 +120,7 @@ function AccountComponent() {
 
     const handleCleanDaily = async () => {
         const a = accountInfo?.alias || account;
-        const nameForUi =
-            getDisplayName(a) || displayName || a;
+        const nameForUi = getDisplayName(a);
 
         setCleanLoading(true);
         setCleanStatus('');

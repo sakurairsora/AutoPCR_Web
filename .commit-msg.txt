@@ -1,6 +1,18 @@
-refactor: S8/S10/S12 三项结构优化
+fix: 第四轮审计修复（5 确认 bug + 6 可疑/坏味道项）
 
-- S8: 危险功能确认从原生 confirm 换站内 AlertDialog（与删账号同款式）；执行逻辑拆为 handleQuickAction(弹窗)/executeQuickAction(执行) 两段
-- S10: 功能选择器区服配置改限并发拉取（最多 3 路在途）：比串行快数倍，服务器部署也不会被并发打挂；结果按区服原序归位
-- S12: 删 useCountHook——批量按钮 loading 改由 busyAccounts.size>0 派生，一份状态一个真相；
-  AccountCard 的 increaseCount/decreaseCount props 与成对调用一并移除（busy 切换本就经 onBusyChange）
+确认 bug：
+- 弹结果总开关关时详情窗仍会弹（singleDetail 未受总开关门控，默认配置即可踩中）→ 门控补上
+- 全选勾选框分母未排除 BATCH_RUNNER：勾满显示半选、点击行为与视觉相反 → selectableNames 共享 useMemo
+- 失效功能提示文案死路（在 groups 里查已消失的名字恒为空，toast 退化成"等 N 个"残句）→ 名字改从旧按钮缓存取
+- 通知 trailing 补查未登记 inflight：补查在途时新事件可再起并行 check，重复拉取+重复弹窗 → 补查前重新登记
+- alarmSeenByAlias 只写不读：第二轮改置位时机时误删了消费守卫，h本这类持续警报每次日常都重复弹 → 守卫补回
+- commitDisplayName 裸 removeItem：隐私模式清空改名即抛未捕获异常 → 新增 safeRemoveItem
+- ConfigMultiSearch 漏迁统一保存流（七控件里唯一残留手写模板）→ 迁入 useConfigSaveFlow
+
+可疑/坏味道：
+- 危险确认弹窗的过期快照：确认期间新变忙的账号，executeQuickAction 入口二次剔除并提示
+- getErrorDescription 迁至 accountShared（原寄生 Config.tsx，8 文件引用），Config re-export 兼容
+- 执行动作限并发 3 路（同 S10 裁决精神：非本地部署也要扛得住）
+- 首挂载不回写 quickActions/batch/popupResult（原样回写+隐私模式白弹"保存失败"）
+- 批量炼成按钮加 loading/disabled 视觉反馈（原来点了没反应）
+- $account 死或、useConfigSaveFlow 死 API、尾换行等杂项

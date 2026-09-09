@@ -1,5 +1,5 @@
 import { Box, Button, Card, Flex, HStack, Heading, Separator, Stack, Tag, useDisclosure } from '@chakra-ui/react'
-import { Fragment, useRef } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { ConfigValue, ModuleInfo } from '@interfaces/Module';
 import { FiChevronDown, FiCopy, FiStar } from 'react-icons/fi';
 import { getAccountAreaSingleResultList, postAccountAreaSingle, putAccountConfig, getAccountConfig, putAccountConfigs } from '@api/Account';
@@ -30,12 +30,14 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
     /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚（仅还原仍等于乐观值的键，避免覆盖用户手改） */
     const bulkBusyRef = useRef(false);
+    const [bulkBusy, setBulkBusy] = useState(false); // 视觉反馈：执行中按钮转圈+全组禁用
     // 回滚判定要读“此刻”的配置：闭包里的 config 是 await 前的旧值，守卫会恒 false 导致回滚失效
     const configRef = useRef(config);
     configRef.current = config;
     const handleBulkSubStatus = async (value: number): Promise<void> => {
         if (bulkBusyRef.current) return; // 防连点：上一批还在队列里
         bulkBusyRef.current = true;
+        setBulkBusy(true);
         try {
             const keys = [
                 'ex_equip_rainbow_enchance_sub_status_1',
@@ -66,6 +68,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             }
         } finally {
             bulkBusyRef.current = false;
+            setBulkBusy(false);
         }
     };
     const { open: isExpanded, onToggle: onToggleExpand } = useDisclosure({ defaultOpen: false });
@@ -342,6 +345,8 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                                                                 variant="outline"
                                                                 colorPalette="blue"
                                                                 onClick={() => void handleBulkSubStatus(opt.value)}
+                                                                loading={bulkBusy}
+                                                                disabled={bulkBusy}
                                                             >
                                                                 {opt.label}
                                                             </Button>

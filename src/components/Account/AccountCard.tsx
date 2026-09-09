@@ -14,7 +14,7 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, favKey } from './accountShared';
+import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, favKey } from './accountShared';
 import { RoundCheckbox, AccountTags, StatusTag } from './AccountCardParts';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
@@ -183,7 +183,7 @@ export function AccountInfo({
         const next = nameDraft.trim();
         // 空名 / 等于真实 alias：恢复为 alias
         if (!next || next === alias) {
-            localStorage.removeItem(DISPLAY_NAME_KEY(alias));
+            safeRemoveItem(DISPLAY_NAME_KEY(alias));
             setDisplayName(alias);
             setNameDraft(alias);
             setIsEditingName(false);

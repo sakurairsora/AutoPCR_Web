@@ -158,7 +158,14 @@ export function safeGetItem(key: string): string | null {
     }
 }
 
-/** localStorage 写入兜底：隐私模式等场景不抛异常打断调用方 */
+/** localStorage 删除兜底：与 safeSetItem 同语义 */
+export function safeRemoveItem(key: string): void {
+    try {
+        localStorage.removeItem(key);
+    } catch {
+        // 本地存储不可用则忽略
+    }
+}
 export function safeSetItem(key: string, value: string): void {
     try {
         localStorage.setItem(key, value);
@@ -301,6 +308,9 @@ export function NotifyWatcher(): null {
                         alarmSeenByAlias.set(alias, false); // 该账号恢复正常：重新武装
                         return;
                     }
+                    // 该账号已处于「弹过警报」状态：静默，直到全绿重新武装。
+                    // 没有它的话 h本这类不去重的持续警报会在每次日常完成时重复弹
+                    if (alarmSeenByAlias.get(alias)) return;
                     // 逐个筛查全部警报模块（find 逐项判断，第一个被抑制不挡后面的）：静音/去重判定统一在 alarmWorthNotifying
                     const chosen = alarms.find(([key]) => alarmWorthNotifying(key, prefsMuted));
                     if (!chosen) return; // 全部被抑制：不弹，也不置警报态（被静音的旧警报不该吞掉后续新警报）
@@ -324,10 +334,13 @@ export function NotifyWatcher(): null {
                     // 拉取失败静默：下次事件再来
                 } finally {
                     notifyInflight.delete(alias);
-                    // 拉取期间又来了事件：补查一次，新警报不用等下一次日常才被发现
+                    // 拉取期间又来了事件：补查一次，新警报不用等下一次日常才被发现（补查同样登记 inflight，保持并发防护闭合）
                     if (notifyTrailing.delete(alias)) {
                         const prefs = loadNotifyPrefs();
-                        if (prefs.enabled) check(alias, prefs.muted);
+                        if (prefs.enabled) {
+                            notifyInflight.add(alias);
+                            check(alias, prefs.muted);
+                        }
                     }
                 }
             })();
@@ -348,3 +361,30 @@ export function NotifyWatcher(): null {
 
     return null;
 }
+
+/** 安全解析后端错误文案，避免 Blob/.text 抛错或 [object Object]（自 Config.tsx 迁入，通用工具） */
+export async function getErrorDescription(err: unknown, fallback = '网络错误'): Promise<string> {
+    const data = (err as { response?: { data?: unknown } })?.response?.data;
+    try {
+        if (data == null) {
+            if (err instanceof Error && err.message) return err.message;
+            return fallback;
+        }
+        if (typeof Blob !== 'undefined' && data instanceof Blob) {
+            const txt = await data.text();
+            return txt || fallback;
+        }
+        if (typeof data === 'string') return data || fallback;
+        if (typeof data === 'object') {
+            try {
+                return JSON.stringify(data);
+            } catch {
+                return fallback;
+            }
+        }
+        return String(data);
+    } catch {
+        return fallback;
+    }
+}
+

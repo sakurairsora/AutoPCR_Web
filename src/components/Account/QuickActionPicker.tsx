@@ -132,13 +132,14 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                 }
             }),
         );
-        // 后端已下线的功能：勾了也带不回来，单独提示（用户主动取消勾选不在此列，不提示）
+        // 后端已下线的功能：勾了也带不回来，单独提示（名字从旧按钮缓存取；用户主动取消勾选不在此列，不提示）
         const vanished = [...selected].filter((k) => !seen.has(k));
         if (vanished.length > 0) {
-            const named = groups.flatMap((g) => g.modules).filter((m) => vanished.includes(m.key)).map((m) => m.name);
-            const extra = vanished.length - named.length;
-            const suffix = extra > 0 ? ` 等 ${vanished.length} 个` : '';
-            toaster.create({ type: 'warning', title: '部分功能已失效', description: `${named.join('、')}${suffix} 在后端已不存在，未能添加` });
+            const knownNames = current.filter((b) => vanished.includes(b.key)).map((b) => b.name);
+            const unknown = vanished.length - knownNames.length;
+            const head = knownNames.join('、');
+            const tail = unknown > 0 ? ` 等 ${vanished.length} 个功能` : '';
+            toaster.create({ type: 'warning', title: '部分功能已失效', description: `${head}${tail} 在后端已不存在，未能添加` });
         }
         modal.resolve(items);
         void modal.hide();
