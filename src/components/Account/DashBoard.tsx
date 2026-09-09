@@ -287,11 +287,9 @@ export function DashBoard() {
         let ok = 0;
         let fail = 0;
         const outcomes = new Map<string, { ok: boolean; detail: string; res?: ResultInfo[] }>();
-        // 执行限并发 3 路：写操作对服务器部署的后端更重，不能像本地那样全量并打
-        let execCursor = 0;
-        const execWorker = async () => {
-            while (execCursor < stillFree.length) {
-                const name = stillFree[execCursor++];
+        // 多账号同时执行同一动作：全并发（每账号一个独立请求，语义即"一起跑"；用户裁决不改）
+        await Promise.all(
+            stillFree.map(async (name) => {
                 try {
                     const res = await postAccountAreaSingle(name, btn.key);
                     outcomes.set(name, { ok: true, detail: '', res });
@@ -302,9 +300,8 @@ export function DashBoard() {
                 } finally {
                     setAccountBusy(name, false);
                 }
-            }
-        };
-        await Promise.all(Array.from({ length: Math.min(3, stillFree.length) }, execWorker));
+            }),
+        );
         // 单账号 + 弹结果总开关开 + 该账号开了弹结果标记：只弹详情窗，不叠汇总窗（总开关关=只 toast，详情窗也不弹）
         const singleDetail = popupResult && stillFree.length === 1 && loadPopupFlag(stillFree[0]) && outcomes.get(stillFree[0])?.ok && outcomes.get(stillFree[0])?.res;
         if (popupResult && !singleDetail) {
@@ -570,7 +567,7 @@ export function DashBoard() {
                             弹结果
                         </Checkbox>
                     </Box>
-                    <Box w="1px" h="1.25rem" bg="black" flexShrink={0} alignSelf="center" />
+                    <Box w="1px" h="1.25rem" bg="border.subtle" flexShrink={0} alignSelf="center" />
                         <NotifySettings />
                 </Flex>
 

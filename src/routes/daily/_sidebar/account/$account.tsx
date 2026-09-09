@@ -71,6 +71,7 @@ function AccountComponent() {
             const freshData = await getAccount(account);
             setAccountInfo(freshData);
             setDisplayName(getDisplayName(account));
+            // 直接写状态：initialAccountInfo 是 loader 快照（不随本页刷新变化），effect 收不到
             const st = (freshData as any)?.daily_clean_time?.status;
             if (st) setCleanStatus(st);
         } catch (e) {
@@ -93,6 +94,9 @@ function AccountComponent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [account]);
 
+    // 数据跟进 effect：initialAccountInfo 变化（父级重拉、路由重载）时跟进状态与显示名。
+    // 换号时本 effect 与上面的重置 effect 都会跑，声明序保证重置先行、本 effect 收尾——语义正确非打架：
+    // 换号=重置 effect 清场 → 本 effect 写入新号数据；本页刷新=只有本 effect 跑（不打回用户正看的 tab）
     useEffect(() => {
         setDisplayName(getDisplayName(account));
         const st = (initialAccountInfo as any)?.daily_clean_time?.status;
@@ -227,7 +231,7 @@ function AccountComponent() {
 
                 {activeTab !== '0' && (
                     <HStack alignItems="center" pr={2} gap={2}>
-                        <Box w="1px" h="1.25rem" bg="black" mx={1} alignSelf="center" />
+                        <Box w="1px" h="1.25rem" bg="border.subtle" mx={1} alignSelf="center" />
                         <Button
                             size="sm"
                             variant={isCurrentTabFavOnly ? 'solid' : 'ghost'}

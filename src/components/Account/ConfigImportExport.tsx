@@ -6,13 +6,13 @@ import {
     Textarea,
     useDisclosure,
 } from "@chakra-ui/react";
-import {Candidate, ConfigType, ConfigValue, ModuleResponse} from "@interfaces/Module.ts";
+import {ConfigValue} from "@interfaces/Module.ts";
 import {ChangeEvent, useRef, useState} from "react";
-import {getAccountConfig, putAccountConfigs} from "@api/Account.ts";
+import {getAccountConfig} from "@api/Account.ts";
 
 import {AreaInfo} from "@interfaces/Account.ts";
 import {AxiosError} from "axios";
-import { favKey } from "./accountShared";
+import { favKey, importConfigFile } from "./accountShared";
 import {saveAs} from "file-saver";
 import { toaster } from "@components/ui/toaster";
 import { getErrorDescription } from "./Config";
@@ -39,8 +39,7 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
             }
             
             // 从 localStorage 读取收藏状态，合并到导出文件
-            const favKey = `autopcr_fav_${alias}`;
-            const storedFav = localStorage.getItem(favKey);
+            const storedFav = localStorage.getItem(favKey(alias));
             const favMap = storedFav ? JSON.parse(storedFav) as Record<string, string[]> : {};
             
             const allConfig: Record<string, Record<string, ConfigValue>> = {};
@@ -68,119 +67,16 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
         });
     };
 
-    const toCheckedConfigItem = (type: ConfigType, candidates: Candidate[], value: unknown): ConfigValue | undefined => {
-        switch (type) {
-            case 'bool':
-                if (typeof value === "boolean") return value;
-                break;
-            case 'single':
-                if (typeof value === "string" || typeof value === "number") return value;
-                break
-            case 'int':
-                if (typeof value === "number") return value;
-                break
-            case 'text':
-                if (typeof value === "string") return value;
-                break
-            case 'time':
-                if (typeof value === "string" && value.match(/^\d{2}:\d{2}$/) !== null) return value;
-                break
-            case 'multi':
-            case 'multi_search': {
-                if (!Array.isArray(value)) {
-                    break
-                }
-                const checkedArray: (string | number)[] = []
-                for (const item of value) {
-                    if (typeof item !== "number" && typeof item !== "string") {
-                        continue
-                    }
-                    if (candidates.find((value) => item === value.value)) {
-                        checkedArray.push(item)
-                    }
-                }
-                return checkedArray
-            }
-        }
-        return undefined
-    }
-    
-    const realImportByModule = (module: ModuleResponse, configs: Record<string, ConfigValue>): Record<string, ConfigValue> => {
-        const uploadConfig: Record<string, ConfigValue> = {};
-        for (const moduleKey in module.info) {
-            if (configs[moduleKey] !== undefined && typeof configs[moduleKey] === "boolean") {
-                uploadConfig[moduleKey] = configs[moduleKey]
-            }
-            const moduleConf = module.info[moduleKey].config
-            for (const moduleConfKey in moduleConf) {
-                const moduleItem = moduleConf[moduleConfKey]
-                const confItem = toCheckedConfigItem(moduleItem.config_type, moduleItem.candidates, configs[moduleConfKey])
-                if (confItem !== undefined) {
-                    uploadConfig[moduleConfKey] = confItem
-                }
-            }
-        }
-        return uploadConfig;
-    }
-    
     const realImport = async (rawCfg: string) => {
         try {
-            // 优化 1：解析输入，增加对损坏文件或非法格式的捕获
-            let configs: Record<string, Record<string, ConfigValue>>;
-            try {
-                const cleanStr = rawCfg.trim();
-                configs = JSON.parse(decodeURIComponent(atob(cleanStr))) as Record<string, Record<string, ConfigValue>>;
-            } catch {
-                throw new Error("配置文件格式无效，请检查选取的配置文件或输入的文本内容。");
-            }
-
-            const configItems = await Promise.all(
-                areas.map((area) => getAccountConfig(alias, area.key))
-            );
-            const uploadConfig: Record<string, ConfigValue> = {};
-            const importedFav: Record<string, string[]> = {};
-
-            configItems.forEach((value, index) => {
-                const areaKey = areas[index].key;
-                const areaConfig = configs[areaKey];
-                if (!areaConfig) {
-                    return;
-                }
-                
-                // 1. Schema 校验的基础配置
-                const validatedAreaConfig = realImportByModule(value, areaConfig);
-                Object.assign(uploadConfig, validatedAreaConfig);
-                
-                // 2. 补全收藏标记与补充细节配置
-                for (const key in areaConfig) {
-                    if (key.startsWith('_fav_')) {
-                        importedFav[areaKey] = importedFav[areaKey] || [];
-                        if (areaConfig[key] === true) {
-                            importedFav[areaKey].push(key.slice(5));
-                        }
-                    } else if (uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
-                        uploadConfig[key] = areaConfig[key];
-                    }
-                }
+            // 流程本体在 accountShared.importConfigFile（与卡片版导入共享；收藏失败降级提示）
+            await importConfigFile({
+                alias,
+                rawCfg,
+                areas,
+                onFavWriteFailed: () => toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' }),
             });
-
-            if (Object.keys(uploadConfig).length === 0) {
-                throw new Error('文件中没有可用配置，未做任何修改。');
-            }
-
-            // 全部成功后才写收藏，避免半导入状态（PUT 失败不覆盖现有收藏）。
-            // 文件不含任何 _fav_ 键（旧版导出）时不动现有收藏；收藏写失败只降级提示，不报"导入失败"
-            await putAccountConfigs(alias, uploadConfig);
-            if (Object.keys(importedFav).length > 0) {
-                try {
-                    localStorage.setItem(favKey(alias), JSON.stringify(importedFav));
-                } catch {
-                    toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' });
-                }
-            }
             toaster.create({ type: 'success', title: '配置导入成功' });
-            
-            // 优化 2：无缝通知父级重新拉取数据刷新页面
             onImportSuccess?.();
         } catch (err) {
             if (err instanceof AxiosError) {

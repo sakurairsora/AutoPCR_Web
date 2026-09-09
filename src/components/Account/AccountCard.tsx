@@ -12,11 +12,10 @@ import { Tooltip } from '../../components/ui/tooltip';
 import NiceModal from '@ebay/nice-modal-react';
 import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
-import { delAccount, getAccount, getAccountConfig, getAccountDailyResultList, postAccountAreaDaily, putAccountConfigs } from '@api/Account';
+import { delAccount, getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, favKey } from './accountShared';
+import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, importConfigFile } from './accountShared';
 import { RoundCheckbox, AccountTags, StatusTag } from './AccountCardParts';
-import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 interface AccountInfoProps {
     account: AccountInfoInterface;
     onToggle: () => void;
@@ -273,65 +272,6 @@ export function AccountInfo({
         />
     );
 
-    const toCheckedConfigItem = (
-        type: ConfigType,
-        candidates: Candidate[],
-        value: unknown,
-    ): ConfigValue | undefined => {
-        switch (type) {
-            case 'bool':
-            case 'single':
-                if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-                    return value as ConfigValue;
-                }
-                break;
-            case 'int':
-                if (typeof value === 'number') return value;
-                break;
-            case 'text':
-                if (typeof value === 'string') return value;
-                break;
-            case 'time':
-                if (typeof value === 'string' && value.match(/^\d{2}:\d{2}$/) !== null) return value;
-                break;
-            case 'multi':
-            case 'multi_search': {
-                if (!Array.isArray(value)) break;
-                const checkedArray: (string | number)[] = [];
-                for (const item of value) {
-                    if (typeof item !== 'number' && typeof item !== 'string') continue;
-                    if (candidates.find((v) => item === v.value)) checkedArray.push(item);
-                }
-                return checkedArray;
-            }
-        }
-        return undefined;
-    };
-
-    const realImportByModule = (
-        module: ModuleResponse,
-        configs: Record<string, ConfigValue>,
-    ): Record<string, ConfigValue> => {
-        const uploadConfig: Record<string, ConfigValue> = {};
-        for (const moduleKey in module.info) {
-            if (configs[moduleKey] !== undefined && typeof configs[moduleKey] === 'boolean') {
-                uploadConfig[moduleKey] = configs[moduleKey];
-            }
-            const moduleConf = module.info[moduleKey].config;
-            for (const moduleConfKey in moduleConf) {
-                const moduleItem = moduleConf[moduleConfKey];
-                const confItem = toCheckedConfigItem(
-                    moduleItem.config_type,
-                    moduleItem.candidates,
-                    configs[moduleConfKey],
-                );
-                if (confItem !== undefined) {
-                    uploadConfig[moduleConfKey] = confItem;
-                }
-            }
-        }
-        return uploadConfig;
-    };
 
     const handleImportConfigFile = async (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -341,55 +281,14 @@ export function AccountInfo({
         buttonLoading.onOpen();
         try {
             const rawCfg = await file.text();
-            let configs: Record<string, Record<string, ConfigValue>>;
-            try {
-                configs = JSON.parse(decodeURIComponent(atob(rawCfg.trim()))) as Record<
-                    string,
-                    Record<string, ConfigValue>
-                >;
-            } catch {
-                throw new Error('配置文件格式无效，请检查选取的配置文件。');
-            }
-
+            // 区服名单现查（弹窗版用 props 传入的 areas，流程本体在 accountShared.importConfigFile）
             const accountDetail = await getAccount(alias);
-            const areas = accountDetail?.area || [];
-            if (!areas.length) {
-                throw new Error('该账号暂无可用区服，无法导入配置');
-            }
-
-            const configItems = await Promise.all(
-                areas.map((area: { key: string }) => getAccountConfig(alias, area.key)),
-            );
-            const uploadConfig: Record<string, ConfigValue> = {};
-            const importedFav: Record<string, string[]> = {};
-
-            configItems.forEach((value, index) => {
-                const areaKey = areas[index].key;
-                const areaConfig = configs[areaKey];
-                if (!areaConfig) return;
-
-                Object.assign(uploadConfig, realImportByModule(value, areaConfig));
-
-                for (const key in areaConfig) {
-                    if (key.startsWith('_fav_')) {
-                        importedFav[areaKey] = importedFav[areaKey] || [];
-                        if (areaConfig[key] === true) {
-                            importedFav[areaKey].push(key.slice(5));
-                        }
-                    } else if (uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
-                        uploadConfig[key] = areaConfig[key];
-                    }
-                }
+            await importConfigFile({
+                alias,
+                rawCfg,
+                areas: accountDetail?.area || [],
+                onFavWriteFailed: () => toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' }),
             });
-
-            if (Object.keys(uploadConfig).length === 0) {
-                throw new Error('文件中没有可用配置，未做任何修改。');
-            }
-            await putAccountConfigs(alias, uploadConfig);
-            // 全部成功后才写收藏；文件不含任何 _fav_ 键（旧版导出）时不动现有收藏
-            if (Object.keys(importedFav).length > 0) {
-                safeSetItem(favKey(alias), JSON.stringify(importedFav));
-            }
             toaster.create({ type: 'success', title: '配置导入成功' });
             onToggle();
         } catch (err) {

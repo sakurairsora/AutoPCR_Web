@@ -4,6 +4,8 @@ import { Box, Popover, Stack, Text } from '@chakra-ui/react';
 import { FiPlus } from 'react-icons/fi';
 import { useEffect, useState } from 'react';
 import { API } from '@api/APIUtils';
+import { getAccountConfig, putAccountConfigs } from '@api/Account';
+import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
 
@@ -385,6 +387,121 @@ export async function getErrorDescription(err: unknown, fallback = '网络错误
         return String(data);
     } catch {
         return fallback;
+    }
+}
+
+
+/** 校验配置项：按 schema 类型严格校验值合法性（bool 只收 boolean；time 必须 hh:mm；multi 候选过滤），不合法返回 undefined（自 AccountCard/ConfigImportExport 双胞胎收簸，取严格语义） */
+export function toCheckedConfigItem(
+    type: ConfigType,
+    candidates: Candidate[],
+    value: unknown,
+): ConfigValue | undefined {
+    switch (type) {
+        case 'bool':
+            if (typeof value === 'boolean') return value;
+            break;
+        case 'single':
+            if (typeof value === 'string' || typeof value === 'number') return value;
+            break;
+        case 'int':
+            if (typeof value === 'number') return value;
+            break;
+        case 'text':
+            if (typeof value === 'string') return value;
+            break;
+        case 'time':
+            if (typeof value === 'string' && value.match(/^\d{2}:\d{2}$/) !== null) return value;
+            break;
+        case 'multi':
+        case 'multi_search': {
+            if (!Array.isArray(value)) break;
+            const checkedArray: (string | number)[] = [];
+            for (const item of value) {
+                if (typeof item !== 'number' && typeof item !== 'string') continue;
+                if (candidates.find((v) => item === v.value)) checkedArray.push(item);
+            }
+            return checkedArray;
+        }
+    }
+    return undefined;
+}
+
+/** 按模块 schema 过滤导入配置：只收 schema 内的键，逐项过 toCheckedConfigItem 校验 */
+export function realImportByModule(
+    module: ModuleResponse,
+    configs: Record<string, ConfigValue>,
+): Record<string, ConfigValue> {
+    const uploadConfig: Record<string, ConfigValue> = {};
+    for (const moduleKey in module.info) {
+        if (configs[moduleKey] !== undefined && typeof configs[moduleKey] === 'boolean') {
+            uploadConfig[moduleKey] = configs[moduleKey];
+        }
+        const moduleConf = module.info[moduleKey].config;
+        for (const moduleConfKey in moduleConf) {
+            const moduleItem = moduleConf[moduleConfKey];
+            const confItem = toCheckedConfigItem(moduleItem.config_type, moduleItem.candidates, configs[moduleConfKey]);
+            if (confItem !== undefined) {
+                uploadConfig[moduleConfKey] = confItem;
+            }
+        }
+    }
+    return uploadConfig;
+}
+
+/** 配置文件导入共享流程：解析 base64 → 逐区服 schema 校验 → PUT → 成功后写收藏标记。
+ *  返回值区分三种结果：成功对象 / 抛出可展示错误。收藏写失败不抛（降级，由 favWriteFailed 通知调用方） */
+export async function importConfigFile(opts: {
+    alias: string;
+    rawCfg: string;
+    /** 区服名单来源：调用方各自获取（卡片现查 / 弹窗用已有 props） */
+    areas: { key: string }[];
+    /** 收藏写失败时回调（用于降级提示）；不传则静默 */
+    onFavWriteFailed?: () => void;
+}): Promise<void> {
+    const { alias, rawCfg, areas, onFavWriteFailed } = opts;
+    let configs: Record<string, Record<string, ConfigValue>>;
+    try {
+        configs = JSON.parse(decodeURIComponent(atob(rawCfg.trim()))) as Record<string, Record<string, ConfigValue>>;
+    } catch {
+        throw new Error('配置文件格式无效，请检查选取的配置文件。');
+    }
+
+    const configItems = await Promise.all(areas.map((area) => getAccountConfig(alias, area.key)));
+    const uploadConfig: Record<string, ConfigValue> = {};
+    const importedFav: Record<string, string[]> = {};
+
+    configItems.forEach((value, index) => {
+        const areaKey = areas[index].key;
+        const areaConfig = configs[areaKey];
+        if (!areaConfig) return;
+
+        Object.assign(uploadConfig, realImportByModule(value, areaConfig));
+
+        // 收藏标记 + schema 外补充键
+        for (const key in areaConfig) {
+            if (key.startsWith('_fav_')) {
+                importedFav[areaKey] = importedFav[areaKey] || [];
+                if (areaConfig[key] === true) {
+                    importedFav[areaKey].push(key.slice(5));
+                }
+            } else if (uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
+                uploadConfig[key] = areaConfig[key];
+            }
+        }
+    });
+
+    if (Object.keys(uploadConfig).length === 0) {
+        throw new Error('文件中没有可用配置，未做任何修改。');
+    }
+    // 全部成功后才写收藏（PUT 失败不覆盖现有收藏）；文件不含 _fav_（旧版导出）时不动收藏
+    await putAccountConfigs(alias, uploadConfig);
+    if (Object.keys(importedFav).length > 0) {
+        try {
+            localStorage.setItem(favKey(alias), JSON.stringify(importedFav));
+        } catch {
+            onFavWriteFailed?.();
+        }
     }
 }
 
