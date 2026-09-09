@@ -21,10 +21,19 @@ export function loadQuickActions(): QuickActionItem[] {
         if (!raw) return [];
         const parsed = JSON.parse(raw) as { version?: number; buttons?: unknown };
         if (parsed?.version !== VERSION || !Array.isArray(parsed.buttons)) return [];
-        return parsed.buttons.filter(
-            (b): b is QuickActionItem =>
-                !!b && typeof (b as QuickActionItem).key === 'string' && typeof (b as QuickActionItem).name === 'string',
-        ).map((b) => ({ ...b, dangerous: b.dangerous === true })); // dangerous 只认显式 true（旧缓存字段缺失不误判危险）
+        return parsed.buttons
+            .filter(
+                (b): b is QuickActionItem =>
+                    !!b && typeof (b as QuickActionItem).key === 'string' && typeof (b as QuickActionItem).name === 'string',
+            )
+            .map((b) => ({
+                // 只取已知字段：未知属性不透传（类型谓词只验了 key/name，展开会把垃圾字段带回）
+                key: b.key,
+                name: b.name,
+                areaKey: typeof b.areaKey === 'string' ? b.areaKey : '',
+                areaName: typeof b.areaName === 'string' ? b.areaName : '',
+                dangerous: b.dangerous === true, // 只认显式 true（旧缓存字段缺失不误判危险）
+            }));
     } catch {
         return [];
     }

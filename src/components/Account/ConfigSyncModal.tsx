@@ -24,6 +24,7 @@ import { AreaInfo } from '@/interfaces/Account';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
 import { getErrorDescription } from './Config';
+import { busyAccountsRef, BATCH_RUNNER } from './accountShared';
 
 interface ConfigSyncModalProps {
     sourceAccount: string;
@@ -53,7 +54,7 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
                 try {
                     // 1. Get All Accounts
                     const userInfo = await getUserInfo();
-                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAccount && name !== 'BATCH_RUNNER') || [];
+                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAccount && name !== BATCH_RUNNER) || [];
                     setAllAccounts(accounts);
                     
                     // 2. Get Config Areas from Source Account
@@ -149,6 +150,16 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
             return;
         }
 
+        // 忙碌互斥：执行中的目标跳过（与清理/导入/删除同一互斥源），防同步 PUT 与在跑动作并发打后端
+        const freeTargets = selectedTargets.filter((t) => !busyAccountsRef.has(t));
+        if (freeTargets.length === 0) {
+            toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选目标账号都正在执行中' });
+            return;
+        }
+        if (freeTargets.length < selectedTargets.length) {
+            toaster.create({ type: 'info', title: `配置同步：已跳过 ${selectedTargets.length - freeTargets.length} 个正在执行中的账号` });
+        }
+
         setIsSyncing(true);
         let successCount = 0;
         let failCount = 0;
@@ -186,8 +197,8 @@ export default NiceModal.create(({ sourceAccount, presetDailyModules }: ConfigSy
             }
 
             // Push to targets
-            // Sequentially to avoid overwhelming if many
-            for (const targetAccount of selectedTargets) {
+            // Sequentially to avoid overwhelming if many（仅空闲目标：见上方忙碌过滤）
+            for (const targetAccount of freeTargets) {
                  try {
                      if (Object.keys(mergedConfig).length > 0) {
                          await putAccountConfigs(targetAccount, mergedConfig);

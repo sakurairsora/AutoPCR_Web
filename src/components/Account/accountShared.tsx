@@ -2,7 +2,7 @@
 
 import { Box, Popover, Stack, Text } from '@chakra-ui/react';
 import { FiPlus } from 'react-icons/fi';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API } from '@api/APIUtils';
 import { getAccountConfig, putAccountConfigs } from '@api/Account';
 import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interfaces/Module';
@@ -12,7 +12,11 @@ import { toaster } from '../../components/ui/toaster';
 
 
 /** 批量清理登记表：账号名 → 清理回调（注册方保证包 ref，调用方无参调用） */
-export const handle: Map<string, () => void | Promise<void>> = new Map();
+/** 批量清理日常的注册表：alias → 该账号卡片的清理入口（DashBoard 全体清理按名调用） */
+export const dailyCleanRegistry: Map<string, () => void | Promise<void>> = new Map();
+
+/** 全局忙碌表（模块级真源）：DashBoard setAccountBusy 时同步写；供弹窗等非父子组件查询互斥 */
+export const busyAccountsRef = new Set<string>();
 
 export const DISPLAY_NAME_KEY = (alias: string) => 'autopcr_displayName_' + alias;
 
@@ -168,11 +172,13 @@ export function safeRemoveItem(key: string): void {
         // 本地存储不可用则忽略
     }
 }
-export function safeSetItem(key: string, value: string): void {
+export function safeSetItem(key: string, value: string): boolean {
     try {
         localStorage.setItem(key, value);
+        return true;
     } catch {
-        // 本地存储不可用则忽略
+        // 本地存储不可用：返回 false 由调用方决定是否提示
+        return false;
     }
 }
 
@@ -290,20 +296,27 @@ function alarmWorthNotifying(key: string, muted: string[]): boolean {
 }
 
 /** 登出/删QQ 时清理跨登录的警报态：避免下一个登录者被上一个用户的警报记录吞掉通知 */
+let notifyGeneration = 0;
 export function resetNotifyWatcherState(): void {
+    notifyGeneration += 1; // 世代+1：在途的晚到响应全部作废，不回写刚清空的表
     alarmSeenByAlias.clear();
     notifyInflight.clear();
     notifyTrailing.clear();
 }
 
 export function NotifyWatcher(): null {
+    // 通知开关沿革：关闭期间事件全部跳过（全绿复位也观测不到），重新开启时清空警报静默表——
+    // 否则关闭期间错过的全绿丢失，重开后的新警报被旧 seen 标记吞掉
+    const lastNotifyEnabledRef = useRef<boolean | null>(null);
     useEffect(() => {
         const check = (alias: string, prefsMuted: string[]) => {
+            const gen = notifyGeneration; // 捕获世代：resetNotifyWatcherState 后本 check 的结果作废
             void (async () => {
                 try {
                     const res = await API.get<{ result?: Record<string, { status?: string; name?: string }> }>(
                         `/account/${encodeURIComponent(alias)}/daily_result?text=true`,
                     );
+                    if (notifyGeneration !== gen) return; // 登出/重置后晚到：丢弃
                     const modules = res?.data?.result ?? {};
                     const alarms = Object.entries(modules).filter(([, m]) => m?.status === '错误' || m?.status === '中止');
                     if (alarms.length === 0) {
@@ -350,7 +363,15 @@ export function NotifyWatcher(): null {
         const off = onDailyFinished((alias: string) => {
             // 偏好在事件到达时现读：改设置无需重挂监听，永无闭包陈旧
             const prefs = loadNotifyPrefs();
-            if (!prefs.enabled) return;
+            if (!prefs.enabled) {
+                lastNotifyEnabledRef.current = false;
+                return;
+            }
+            if (lastNotifyEnabledRef.current === false) {
+                // 刚从关闭切到开启：关闭期间的警报期状态作废，重新武装所有账号
+                alarmSeenByAlias.clear();
+            }
+            lastNotifyEnabledRef.current = true;
             if (notifyInflight.has(alias)) {
                 notifyTrailing.add(alias); // 正在拉取：标记补查而非丢弃
                 return;
@@ -366,6 +387,9 @@ export function NotifyWatcher(): null {
 
 /** 危险分区的显示名（后端约定）：快捷按钮 dangerous 标记、危险确认弹窗、Picker 染色共用此常量 */
 export const DANGEROUS_AREA_NAME = '危险';
+
+/** 批量运行虚拟账号名（后端约定）：全选/全体兜底/同步目标列表等处统一排除，单勾直打后端会 404 */
+export const BATCH_RUNNER = 'BATCH_RUNNER';
 
 /** 安全解析后端错误文案，避免 Blob/.text 抛错或 [object Object]（自 Config.tsx 迁入，通用工具） */
 export async function getErrorDescription(err: unknown, fallback = '网络错误'): Promise<string> {
@@ -408,13 +432,21 @@ export function toCheckedConfigItem(
             if (typeof value === 'string' || typeof value === 'number') return value;
             break;
         case 'int':
-            if (typeof value === 'number') return value;
+            // 只收整数：小数对 int 型配置无意义（后端解析行为不明，宁拒不猜）
+            if (typeof value === 'number' && Number.isInteger(value)) return value;
             break;
         case 'text':
             if (typeof value === 'string') return value;
             break;
         case 'time':
-            if (typeof value === 'string' && value.match(/^\d{2}:\d{2}$/) !== null) return value;
+            // hh:mm 且范围合法（00-23:00-59）："99:99" 这种格式对但值错的拒绝
+            if (
+                typeof value === 'string' &&
+                /^\d{2}:\d{2}$/.test(value) &&
+                Number(value.slice(0, 2)) <= 23 &&
+                Number(value.slice(3)) <= 59
+            )
+                return value;
             break;
         case 'multi':
         case 'multi_search': {
@@ -481,11 +513,12 @@ export async function importConfigFile(opts: {
     configItems.forEach((value, index) => {
         const areaKey = areas[index].key;
         const areaConfig = configs[areaKey];
-        if (!areaConfig) return;
+        // 区服层形状守卫：字符串/数组是真值，直接迭代会把 "abc" 拆成 "0"/"1"/"2" 垃圾键直通 PUT
+        if (typeof areaConfig !== 'object' || areaConfig === null || Array.isArray(areaConfig)) return;
 
         Object.assign(uploadConfig, realImportByModule(value, areaConfig));
 
-        // 收藏标记 + schema 外补充键
+        // 收藏标记 + schema 外补充键（补充键只放行原始值：对象/数组不属于配置值，防垃圾直传）
         for (const key in areaConfig) {
             if (key.startsWith('_fav_')) {
                 importedFav[areaKey] = importedFav[areaKey] || [];
@@ -493,7 +526,10 @@ export async function importConfigFile(opts: {
                     importedFav[areaKey].push(key.slice(5));
                 }
             } else if (uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
-                uploadConfig[key] = areaConfig[key];
+                const v = areaConfig[key];
+                if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+                    uploadConfig[key] = v;
+                }
             }
         }
     });

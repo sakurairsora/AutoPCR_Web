@@ -20,6 +20,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Field } from '../../components/ui/field';
 import { putAccount } from '@/api/Account';
 import { getErrorDescription } from './Config';
+import { BATCH_RUNNER } from './accountShared';
 import { toaster } from '../../components/ui/toaster';
 
 interface InfoProps {
@@ -35,7 +36,7 @@ const fadeEntry = keyframes`
 export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
     const alias = accountInfo?.alias || '';
     const displayName =
-        alias && alias !== 'BATCH_RUNNER'
+        alias && alias !== BATCH_RUNNER
             ? (localStorage.getItem(`autopcr_displayName_${alias}`) || alias)
             : alias;
 
@@ -130,7 +131,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
         >
              <Flex justify="space-between" align="center" mb={2}>
                 <Heading size="lg" fontWeight="bold" letterSpacing="tight">
-                    {alias === 'BATCH_RUNNER' ? '批量运行配置' : displayName}
+                    {alias === BATCH_RUNNER ? '批量运行配置' : displayName}
                 </Heading>
                 {accountInfo?.alias !== 'BATCH_RUNNER' && (
                     <Text fontSize="sm" color="fg.muted">
@@ -141,7 +142,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
 
             <form onSubmit={handleSave}>
                 <Stack gap={6}>
-                    {accountInfo?.alias !== 'BATCH_RUNNER' && (
+                    {accountInfo?.alias !== BATCH_RUNNER && (
                         <>
                             <Field label="账号" required>
                                 <Input
@@ -193,7 +194,7 @@ export default function Info({ accountInfo, onSaveSuccess }: InfoProps) {
                         </>
                     )}
 
-                    {accountInfo?.alias === 'BATCH_RUNNER' && (
+                    {accountInfo?.alias === BATCH_RUNNER && (
                         <Stack gap={5}>
                              <Flex justify="space-between" align="center" bg="bg.subtle" p={3} rounded="xl">
                                 <Checkbox 

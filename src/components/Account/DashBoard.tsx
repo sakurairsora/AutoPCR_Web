@@ -40,7 +40,7 @@ import { NotifySettings } from './accountShared';
 
 import { getErrorDescription } from './Config';
 
-import { handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -65,7 +65,8 @@ export function DashBoard() {
     const [pendingDanger, setPendingDanger] = useState<{ btn: QuickActionItem; free: string[]; targetDesc: string } | null>(null);
     const [alias, setAlias] = useState<string>('');
     const [isTableView, setIsTableView] = useState<boolean>(() => {
-        const savedView = localStorage.getItem('accountViewMode');
+        // 与写侧同键同通道（safeGetItem）：隐私模式初始化不炸，key 不双源
+        const savedView = safeGetItem(VIEW_MODE_KEY);
         return savedView ? savedView === 'table' : false;
     });
     const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
@@ -85,6 +86,9 @@ export function DashBoard() {
             else next.delete(name);
             return next;
         });
+        // 模块级真源同步：ConfigSyncModal 等非父子组件靠它做忙碌互斥
+        if (busy) busyAccountsRef.add(name);
+        else busyAccountsRef.delete(name);
     };
     const quickActionsLoadedOnce = useRef(false);
     useEffect(() => {
@@ -221,7 +225,7 @@ export function DashBoard() {
 
     /** 可勾选名单（排除 BATCH_RUNNER 虚拟账号）：全选判定与全选操作共用同一分母 */
     const selectableNames = useMemo(
-        () => userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== 'BATCH_RUNNER') ?? [],
+        () => userInfo?.accounts?.map((acc) => acc.name).filter((n) => n !== BATCH_RUNNER) ?? [],
         [userInfo?.accounts],
     );
     const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === selectableNames.length;
@@ -336,7 +340,7 @@ export function DashBoard() {
     };
 
     const handleOpenQuickPicker = () => {
-        const refAlias = userInfo?.accounts?.find((acc) => acc.name !== 'BATCH_RUNNER')?.name;
+        const refAlias = userInfo?.accounts?.find((acc) => acc.name !== BATCH_RUNNER)?.name;
         if (!refAlias) {
             toaster.create({ type: 'warning', title: '请先创建一个账号' });
             return;

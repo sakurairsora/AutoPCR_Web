@@ -1,5 +1,5 @@
 import { Box, Button, HStack, Tabs, Tag } from '@chakra-ui/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FiActivity, FiCheck, FiStar, FiTarget, FiUserX } from 'react-icons/fi';
 import NiceModal from '@ebay/nice-modal-react';
 
@@ -46,6 +46,10 @@ function AccountComponent() {
     // 「弹结果」：本账号执行完自动弹出结果窗（本地存储，按账号记忆）
     const [popupOn, setPopupOn] = useState<boolean>(() => loadPopupFlag(account));
 
+    // 跨账号晚到写守卫：async 链 await 后校验请求发起时的账号是否还是当前账号（换号不重挂载，晚到的 A 响应不得写进 B 页）
+    const accountRef = useRef(account);
+    accountRef.current = account;
+
     const statusMeta = useMemo(() => {
         if (cleanStatus === '成功' || cleanStatus === '跳过') {
             return {
@@ -67,10 +71,12 @@ function AccountComponent() {
     }, [cleanStatus]);
 
     const refreshAccountData = async () => {
+        const a = accountRef.current;
         try {
-            const freshData = await getAccount(account);
+            const freshData = await getAccount(a);
+            if (accountRef.current !== a) return; // 换号了：晚到数据丢弃
             setAccountInfo(freshData);
-            setDisplayName(getDisplayName(account));
+            setDisplayName(getDisplayName(a));
             // 直接写状态：initialAccountInfo 是 loader 快照（不随本页刷新变化），effect 收不到
             const st = freshData?.daily_clean_time?.status;
             if (st) setCleanStatus(st);
@@ -91,6 +97,7 @@ function AccountComponent() {
         setDisplayName(getDisplayName(account));
         setCleanStatus(initialAccountInfo?.daily_clean_time?.status || '');
         setFavOnlyMap({});
+        setCleanLoading(false); // 上一账号清理在途时切过来：B 页按钮不得转圈
         setPopupOn(loadPopupFlag(account)); // 换号跟勾：弹结果是每账号标记，重置 effect 不补这条会显示上个号的开关态
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [account]);
@@ -134,6 +141,7 @@ function AccountComponent() {
         try {
             const res = await postAccountAreaDaily(a);
             void emitDailyFinished(a);
+            if (accountRef.current !== a) return; // 换号了：晚到结果不写新页面（loading 由重置 effect 兜底）
             const resAny = res as { daily_clean_time?: { status?: string } | null; status?: string } | undefined;
             const st = resAny?.daily_clean_time?.status || resAny?.status || '';
 
@@ -159,14 +167,15 @@ function AccountComponent() {
                     });
             }
         } catch (err: any) {
-            setCleanStatus('错误');
+            if (accountRef.current === a) setCleanStatus('错误');
             toaster.create({
                 type: 'error',
                 title: `${nameForUi}清日常失败`,
                 description: await getErrorDescription(err),
             });
         } finally {
-            setCleanLoading(false);
+            // 换号后 loading 交给重置 effect，这里不再碰（晚到 finally 会把 B 页的按钮状态搅乱）
+            if (accountRef.current === a) setCleanLoading(false);
         }
     };
 

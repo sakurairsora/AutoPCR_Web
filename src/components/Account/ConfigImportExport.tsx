@@ -12,7 +12,7 @@ import {getAccountConfig} from "@api/Account.ts";
 
 import {AreaInfo} from "@interfaces/Account.ts";
 import {AxiosError} from "axios";
-import { favKey, importConfigFile } from "./accountShared";
+import { favKey, importConfigFile, safeGetItem, BATCH_RUNNER } from "./accountShared";
 import {saveAs} from "file-saver";
 import { toaster } from "@components/ui/toaster";
 import { getErrorDescription } from "./Config";
@@ -38,9 +38,14 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
                 return;
             }
             
-            // 从 localStorage 读取收藏状态，合并到导出文件
-            const storedFav = localStorage.getItem(favKey(alias));
-            const favMap = storedFav ? JSON.parse(storedFav) as Record<string, string[]> : {};
+            // 从 localStorage 读取收藏状态，合并到导出文件（safe 读取：隐私模式/损坏 JSON 都兜成空表，导出流程不炸）
+            const storedFav = safeGetItem(favKey(alias));
+            let favMap: Record<string, string[]> = {};
+            try {
+                favMap = storedFav ? (JSON.parse(storedFav) as Record<string, string[]>) : {};
+            } catch {
+                favMap = {};
+            }
             
             const allConfig: Record<string, Record<string, ConfigValue>> = {};
             configs.forEach((value, index) => {
@@ -116,7 +121,7 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
 
     return (
         <>
-            {alias != 'BATCH_RUNNER' &&
+            {alias != BATCH_RUNNER &&
                 <Stack gap={4} w={'full'} bg={bgColor} rounded={'xl'} boxShadow={'lg'} p={6} my={12}>
                     <Heading lineHeight={1.1} fontSize={{ base: '2xl', sm: '3xl' }}>配置导入/导出</Heading>
                     <Button colorPalette="brand" w="full" loading={open}

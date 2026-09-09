@@ -63,6 +63,9 @@ function useConfigSaveFlow(
     const mountedRef = useRef(true);
     const valueRef = useRef(propValue);
     valueRef.current = propValue;
+    // 最后确认值（服务器已知的状态）：初始=加载值，每笔保存成功推进。失败回滚一律回到它——
+    // 若回到「上一笔提交值」，链式失败时那个值可能从未持久化成功，UI 会停在服务器从未见过的值上
+    const lastConfirmedRef = useRef(propValue);
     const onUpdateRef = useRef(onConfigUpdate);
     onUpdateRef.current = onConfigUpdate;
 
@@ -83,21 +86,23 @@ function useConfigSaveFlow(
             rollbackPayload?: (previous: ConfigValue) => ConfigValue;
         },
     ): Promise<boolean> => {
-        const previous = valueRef.current;
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
+            lastConfirmedRef.current = payload; // 保存成功：推进最后确认值
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });
             }
             return true;
         } catch (err) {
             // 仅当父级当前值仍等于本笔乐观值才回滚：在途期间可能有后笔提交覆盖（连点场景），
-            // 无脑回滚会把后笔的乐观值一并踩掉，即使后笔随后成功也会 UI/服务器永久 desync（与 Module.handleBulkSubStatus 同一守卫思路）
+            // 无脑回滚会把后笔的乐观值一并踩掉，即使后笔随后成功也会 UI/服务器永久 desync（与 Module.handleBulkSubStatus 同一守卫思路）。
+            // 契约：消费方必须传 onConfigUpdate 且父级回显同一引用，否则失败时显示回滚也会被此守卫跳过
             if (valueRef.current === payload) {
-                onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(previous) : previous);
+                const confirmed = lastConfirmedRef.current;
+                onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(confirmed) : confirmed);
                 if (mountedRef.current) {
-                    opts?.onRollbackDisplay?.(previous);
+                    opts?.onRollbackDisplay?.(confirmed);
                 }
             }
             if (mountedRef.current) {

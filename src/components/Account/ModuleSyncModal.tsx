@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toaster } from '../../components/ui/toaster';
 import { getErrorDescription } from './Config';
+import { BATCH_RUNNER } from './accountShared';
 
 interface ModuleSyncModalProps {
     sourceAlias: string;
@@ -39,7 +40,7 @@ export default NiceModal.create(({ sourceAlias, moduleName }: ModuleSyncModalPro
                 setIsLoading(true);
                 try {
                     const userInfo = await getUserInfo();
-                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAlias && name !== 'BATCH_RUNNER') || [];
+                    const accounts = userInfo?.accounts?.map(acc => acc.name).filter(name => name !== sourceAlias && name !== BATCH_RUNNER) || [];
                     setAllAccounts(accounts);
                     setSelectedTargets(accounts);
                 } catch (err) {

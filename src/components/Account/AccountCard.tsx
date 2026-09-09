@@ -14,7 +14,8 @@ import ResultInfoModal from './ResultInfoModal';
 import { toaster } from '../../components/ui/toaster';
 import { delAccount, getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
 import { getErrorDescription } from './Config';
-import { handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, importConfigFile } from './accountShared';
+import { dailyCleanRegistry as handle, DISPLAY_NAME_KEY, getDisplayName, emitDailyFinished, safeSetItem, safeRemoveItem, importConfigFile } from './accountShared';
+import { clearAreaConfigCache } from './Area';
 import { RoundCheckbox, AccountTags, StatusTag } from './AccountCardParts';
 interface AccountInfoProps {
     account: AccountInfoInterface;
@@ -143,6 +144,9 @@ export function AccountInfo({
             toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
             return;
         }
+        // 删除在途同样登记忙碌：否则这几百 ms 里清理/导入/二次删除可并发发起，晚到的清理响应还会把已删账号写回成幽灵行
+        onBusyRef.current?.(alias, true);
+        busyRef.current = true;
         delAccount(alias)
             .then((res) => {
                 toaster.create({ type: 'success', title: '删除账号成功', description: res });
@@ -154,11 +158,15 @@ export function AccountInfo({
                     title: '删除账号失败',
                     description: await getErrorDescription(err),
                 });
+            })
+            .finally(() => {
+                busyRef.current = false;
+                onBusyRef.current?.(alias, false);
             });
     };
 
     const handleDailyResult = () => {
-        toaster.create({ type: 'info', title: `正在获取${alias}的日常结果...` });
+        toaster.create({ type: 'info', title: `正在获取${displayNameRef.current || alias}的日常结果...` });
         getAccountDailyResultList(alias)
             .then(async (res) => {
                 toaster.create({ type: 'success', title: '获取日常结果成功' });
@@ -207,7 +215,10 @@ export function AccountInfo({
             setIsEditingName(false);
             return;
         }
-        safeSetItem(DISPLAY_NAME_KEY(alias), next);
+        if (!safeSetItem(DISPLAY_NAME_KEY(alias), next)) {
+            // 存储不可用：明说，别让新名字闪一下又静默弹回旧值
+            toaster.create({ type: 'warning', title: '显示名保存失败', description: '本地存储不可用，本次修改不会保留' });
+        }
         setDisplayName(next);
         setIsEditingName(false);
     };
@@ -310,6 +321,8 @@ export function AccountInfo({
                 onFavWriteFailed: () => toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' }),
             });
             toaster.create({ type: 'success', title: '配置导入成功' });
+            // 失效区服配置缓存：详情页 Picker 会预热它，不清会导致详情页显示导入前的旧值、且后续拨控件以旧值为基准写回
+            clearAreaConfigCache(alias);
             onToggle();
         } catch (err) {
             if (err instanceof AxiosError) {

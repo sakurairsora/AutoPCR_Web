@@ -34,6 +34,8 @@ interface PickerGroup {
 const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPickerProps) => {
     const modal = useModal();
     const [groups, setGroups] = useState<PickerGroup[]>([]);
+    // 拉取失败独立于「列表为空」：合法空列表（区服空/模块全下线）允许确认（那是移除旧按钮的唯一途径），失败列表不行
+    const [fetchFailed, setFetchFailed] = useState(false);
     const [selected, setSelected] = useState<Set<string>>(() => new Set(current.map((b) => b.key)));
     const [searchText, setSearchText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -71,10 +73,12 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                     return { areaKey: area.key, areaName: area.name, modules: mods };
                 });
                 if (isMounted) setGroups(built);
+                if (isMounted) setFetchFailed(false);
             } catch (err) {
                 // 拉取失败必须清空列表：modal 关闭不卸载，留着旧数据会渲染陈旧功能并可确认写回（后端已下线的功能混进快捷栏）
                 if (isMounted) {
                     setGroups([]);
+                    setFetchFailed(true);
                     toaster.create({ type: 'error', title: '获取功能列表失败', description: '请检查网络后重试' });
                 }
             } finally {
@@ -123,7 +127,7 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
     };
 
     const handleConfirm = () => {
-        if (groups.length === 0) return; // 拉取失败时不允许确认，避免误清空全部按钮
+        if (fetchFailed) return; // 拉取失败不允许确认；合法空列表可以（确认=清空全部按钮）
         // 顺序=列表顺序（日常在前）；同 key 跨区服只保留首个，避免重复按钮
         const items: QuickActionItem[] = [];
         const seen = new Set<string>();
@@ -223,7 +227,7 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                     </Text>
                 </ModalBody>
                 <ModalFooter>
-                    <Button colorPalette="blue" mr={3} onClick={handleConfirm} loading={isLoading} disabled={groups.length === 0}>
+                    <Button colorPalette="blue" mr={3} onClick={handleConfirm} loading={isLoading} disabled={fetchFailed}>
                         确定
                     </Button>
                     <Button variant="ghost" onClick={handleClose}>

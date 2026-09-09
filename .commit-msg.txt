@@ -1,22 +1,25 @@
-fix: 第五轮审计修复（P1 全部 6 项 + P2 8 项）
+fix: 第六轮审计修复（P1 换号晚到写 + P2 全部 + P3 八项）
 
 P1：
-- 详情窗取键 free[0] 与判定 stillFree[0] 不一致：二次剔除生效时 B 的结果静默丢失 → 统一 stillFree[0]
-- 导入互斥只置位不检查：入口补 busy 守卫（清理/快捷执行中拒绝导入）；删除账号同样补守卫
-- useConfigSaveFlow 回滚快照固定：连点场景后笔乐观值被踩、UI/服务器永久 desync → 回滚前校验父级值仍等于本笔乐观值（与 Module 批量守卫同思路）
-- $account 换号重置 effect 漏 popupOn：A 关掉的开关态错误带到 B → 补 setPopupOn(loadPopupFlag(account))
-- Picker 拉取失败不清 groups：陈旧列表可确认写回（后端已下线功能混进快捷栏）→ catch 清空
-- 失效 key 永驻 selected：此后每次确认弹无名幽灵警告 → 确认时剪枝幽灵键（可见勾选照旧，符合保留裁决）
+- $account 跨账号晚到写：accountRef 世代守卫——refreshAccountData/handleCleanDaily 的 await 后校验账号是否仍为当前账号，
+  A 的晚到响应不再覆盖 B 页状态；catch/finally 同守卫；换号重置 effect 补 cleanLoading=false（B 页按钮不继承 A 的转圈）
 
 P2：
-- 批次剔除 effect 把 accounts 缺失当空集：瞬时异常永久抹掉星标批次 → accounts 为 null 直接返回
-- 丢「账号无区服」守卫：迁移中消失 → 卡片导入路径补回
-- 收藏整表覆盖：文件没覆盖的区服收藏被静默清空 → 按 JSON 合并保留既有
-- JSON.parse 结果不校验：null/数组穿透出英文 TypeError → 运行时形状检查
-- BATCH_RUNNER 渲染排除不对称：单卡可勾虚拟账号直打后端 → 两处渲染循环改用 selectableNames
-- dangerous/危险 魔法值三处 → DANGEROUS_AREA_NAME 常量；loadQuickActions 的 dangerous 只认显式 true
-- 空目标误报「都在执行中」：无账号时提示「请先创建一个账号」（与 Picker 分流）
-- 批次 toast 计数虚报：改用实际差值
-- IME 兜底 setTimeout 捕获旧闭包：commitNameRef 稳定转发最新 commitDisplayName
-- daily_clean_time 补进 AccountResponse 接口，$account 六处 as any 清除
-- DashBoard 双 @api/Account import 合并（putUserInfo 实为活代码：改密码在用，审计该条误报）
+- useConfigSaveFlow 回滚目标改「最后确认值」：lastConfirmedRef 初始=加载值、成功推进；链式失败不再回滚到从未持久化成功的乐观值
+- 删除账号在途登记忙碌：互斥从单向变双向（清理/导入/删除全闭合）
+- importConfigFile 区服层形状校验：字符串/数组不再直通迭代成垃圾键；schema 外补充键只放行原始值
+- 卡片导入成功后 clearAreaConfigCache：详情页不再命中导入前旧缓存
+- 导出配置裸 getItem/JSON.parse → safeGetItem + try-catch 兜空表
+- 通知关闭→开启时清空 alarmSeenByAlias：关闭期间错过的全绿不再吞掉重开后的新警报
+- 配置同步参与忙碌互斥：busyAccountsRef 模块级真源（setAccountBusy 同步写），handleSync 过滤忙碌目标
+
+P3：
+- isTableView 读侧迁移 safeGetItem+VIEW_MODE_KEY（与写侧同键同通道）
+- Picker 拉取失败与合法空列表分流：fetchFailed 独立标记，空列表可确认（移除旧按钮唯一途径）
+- 改名 safeSetItem 失败提示（返回布尔）；handleDailyResult 提示用显示名口径
+- resetNotifyWatcherState 加世代计数：登出后在途响应晚到不回写（401 路径待 axios 层覆盖，暂记录）
+- toCheckedConfigItem：time 验范围（99:99 拒）、int 拒小数
+- BATCH_RUNNER 魔法字符串 13 处收口为常量（5 文件）；handle 注册表更名 dailyCleanRegistry
+- quickActions load 白名单式重建（未知属性不透传）
+- 用户裁决存档：弹结果两开关各自独立、每账号自己算自己的——Module.tsx 只查账号级标记是正确行为，不叠加总开关
+  （putUserInfo 死导入为审计误报：改密码功能在用，再次证伪）
