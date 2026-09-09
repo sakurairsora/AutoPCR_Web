@@ -36,7 +36,7 @@ function AccountComponent() {
     const [cleanLoading, setCleanLoading] = useState(false);
 
     const [cleanStatus, setCleanStatus] = useState<string>(
-        () => (initialAccountInfo as any)?.daily_clean_time?.status || '',
+        () => initialAccountInfo?.daily_clean_time?.status || '',
     );
 
     const [displayName, setDisplayName] = useState(
@@ -72,7 +72,7 @@ function AccountComponent() {
             setAccountInfo(freshData);
             setDisplayName(getDisplayName(account));
             // 直接写状态：initialAccountInfo 是 loader 快照（不随本页刷新变化），effect 收不到
-            const st = (freshData as any)?.daily_clean_time?.status;
+            const st = freshData?.daily_clean_time?.status;
             if (st) setCleanStatus(st);
         } catch (e) {
             console.error(e);
@@ -89,8 +89,9 @@ function AccountComponent() {
         setAccountInfo(initialAccountInfo);
         setActiveTab(initialTab);
         setDisplayName(getDisplayName(account));
-        setCleanStatus((initialAccountInfo as any)?.daily_clean_time?.status || '');
+        setCleanStatus(initialAccountInfo?.daily_clean_time?.status || '');
         setFavOnlyMap({});
+        setPopupOn(loadPopupFlag(account)); // 换号跟勾：弹结果是每账号标记，重置 effect 不补这条会显示上个号的开关态
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [account]);
 
@@ -99,7 +100,7 @@ function AccountComponent() {
     // 换号=重置 effect 清场 → 本 effect 写入新号数据；本页刷新=只有本 effect 跑（不打回用户正看的 tab）
     useEffect(() => {
         setDisplayName(getDisplayName(account));
-        const st = (initialAccountInfo as any)?.daily_clean_time?.status;
+        const st = initialAccountInfo?.daily_clean_time?.status;
         if (st) setCleanStatus(st);
     }, [initialAccountInfo, account]);
 
@@ -133,10 +134,8 @@ function AccountComponent() {
         try {
             const res = await postAccountAreaDaily(a);
             void emitDailyFinished(a);
-            const st =
-                (res as any)?.daily_clean_time?.status ||
-                (res as any)?.status ||
-                '';
+            const resAny = res as { daily_clean_time?: { status?: string } | null; status?: string } | undefined;
+            const st = resAny?.daily_clean_time?.status || resAny?.status || '';
 
             setCleanStatus(st);
             sessionStorage.setItem('autopcr_need_refresh_dashboard', '1');

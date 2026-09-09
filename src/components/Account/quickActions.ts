@@ -24,7 +24,7 @@ export function loadQuickActions(): QuickActionItem[] {
         return parsed.buttons.filter(
             (b): b is QuickActionItem =>
                 !!b && typeof (b as QuickActionItem).key === 'string' && typeof (b as QuickActionItem).name === 'string',
-        );
+        ).map((b) => ({ ...b, dangerous: b.dangerous === true })); // dangerous 只认显式 true（旧缓存字段缺失不误判危险）
     } catch {
         return [];
     }

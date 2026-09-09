@@ -14,8 +14,7 @@ import {
 import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
-import { clearAccounts, deleteAccount, getUserInfo, putUserInfo } from '@api/Account';
-import { delAccount, postAccount, postAccountAreaSingle, postAccountImport } from '@api/Account';
+import { clearAccounts, delAccount, deleteAccount, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { ResultInfo } from '@interfaces/UserInfo';
@@ -114,7 +113,9 @@ export function DashBoard() {
     // 批次名单随账号列表自动剔除失效项（依赖名单序列化：删一加一 length 不变也能触发）
     useEffect(() => {
         if (!userInfo) return;
-        const names = new Set(userInfo.accounts?.map((acc) => acc.name) ?? []);
+        // accounts 缺失/为 null（瞬时后端异常）不当成空名单：否则会把用户攒的批次整体滤空并持久化
+        if (!userInfo.accounts) return;
+        const names = new Set(userInfo.accounts.map((acc) => acc.name));
         setBatchAccounts((prev) => {
             const next = prev.filter((name) => names.has(name));
             return next.length === prev.length ? prev : next;
@@ -173,9 +174,10 @@ export function DashBoard() {
             ? batchAccounts.filter((name) => !selectedAccounts.includes(name))
             : [...batchAccounts, ...selectedAccounts.filter((name) => !batchAccounts.includes(name))];
         setBatchAccounts(next);
+        const delta = Math.abs(next.length - batchAccounts.length);
         toaster.create({
             type: 'success',
-            title: allIn ? `已将 ${selectedAccounts.length} 个账号移出自动批次` : `已将 ${selectedAccounts.length} 个账号加入自动批次`,
+            title: allIn ? `已将 ${delta} 个账号移出自动批次` : `已将 ${delta} 个账号加入自动批次`,
         });
     };
 
@@ -231,6 +233,11 @@ export function DashBoard() {
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyRef.current.has(name));
         const busy = targets.filter((name) => busyRef.current.has(name));
+        if (targets.length === 0) {
+            // 没有目标与「都在忙」是两回事：前者引导建号，后者才让等
+            toaster.create({ type: 'info', title: '请先创建一个账号' });
+            return null;
+        }
         if (free.length === 0) {
             toaster.create({ type: 'warning', title: '请等待执行完毕', description: '所选账号都正在执行中' });
             return null;
@@ -321,9 +328,9 @@ export function DashBoard() {
         }
         // 仅对单账号执行且该账号开了"弹结果"标记的，直接弹该账号的功能结果窗
         if (singleDetail) {
-            const o = outcomes.get(free[0]);
+            const o = outcomes.get(stillFree[0]);
             if (o?.res) {
-                NiceModal.show(ResultInfoModal, { alias: free[0], title: btn.name, resultInfo: o.res }).catch(() => {});
+                NiceModal.show(ResultInfoModal, { alias: stillFree[0], title: btn.name, resultInfo: o.res }).catch(() => {});
             }
         }
     };
@@ -753,7 +760,9 @@ export function DashBoard() {
                                     </Table.Row>
                                 ))
                             ) : (
-                                userInfo?.accounts?.map((account) => (
+                                selectableNames.map((name) => {
+                                    const account = userInfo.accounts!.find((acc) => acc.name === name)!;
+                                    return (
                                     <AccountInfo
                                         key={account.name}
                                         account={account}
@@ -770,7 +779,8 @@ export function DashBoard() {
                                             NiceModal.show(ConfigSyncModal, { sourceAccount: a });
                                         }}
                                     />
-                                ))
+                                    );
+                                })
                             )}
                         </Table.Body>
                     </Table.Root>
@@ -797,7 +807,9 @@ export function DashBoard() {
                                 </Card.Root>
                             ))
                         ) : (
-                            userInfo?.accounts?.map((account) => (
+                            selectableNames.map((name) => {
+                                const account = userInfo.accounts!.find((acc) => acc.name === name)!;
+                                return (
                                 <AccountInfo
                                     key={account.name}
                                     account={account}
@@ -814,7 +826,8 @@ export function DashBoard() {
                                         NiceModal.show(ConfigSyncModal, { sourceAccount: a });
                                     }}
                                 />
-                            ))
+                                );
+                            })
                         )}
                     </SimpleGrid>
                 </Box>

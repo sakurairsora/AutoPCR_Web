@@ -92,9 +92,15 @@ function useConfigSaveFlow(
             }
             return true;
         } catch (err) {
-            onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(previous) : previous);
+            // 仅当父级当前值仍等于本笔乐观值才回滚：在途期间可能有后笔提交覆盖（连点场景），
+            // 无脑回滚会把后笔的乐观值一并踩掉，即使后笔随后成功也会 UI/服务器永久 desync（与 Module.handleBulkSubStatus 同一守卫思路）
+            if (valueRef.current === payload) {
+                onUpdateRef.current?.(key, opts?.rollbackPayload ? opts.rollbackPayload(previous) : previous);
+                if (mountedRef.current) {
+                    opts?.onRollbackDisplay?.(previous);
+                }
+            }
             if (mountedRef.current) {
-                opts?.onRollbackDisplay?.(previous);
                 toaster.create({ type: 'error', title: '保存失败', description: await getErrorDescription(err) });
             }
             return false;

@@ -17,6 +17,7 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { toaster } from '../../components/ui/toaster';
 import { QuickActionItem } from './quickActions';
 import { getCachedAreaConfig, setCachedAreaConfig } from './Area';
+import { DANGEROUS_AREA_NAME } from './accountShared';
 
 interface QuickActionPickerProps {
     /** 参考账号：功能定义全服一致，取任意一个真实账号拉取 */
@@ -66,12 +67,14 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                     const mods = (res?.order || [])
                         .map((k) => res.info?.[k])
                         .filter((m): m is ModuleInfo => !!m && m.implemented && m.runnable)
-                        .map((m) => ({ key: m.key, name: m.name, dangerous: area.name === '危险' }));
+                        .map((m) => ({ key: m.key, name: m.name, dangerous: area.name === DANGEROUS_AREA_NAME }));
                     return { areaKey: area.key, areaName: area.name, modules: mods };
                 });
                 if (isMounted) setGroups(built);
             } catch (err) {
+                // 拉取失败必须清空列表：modal 关闭不卸载，留着旧数据会渲染陈旧功能并可确认写回（后端已下线的功能混进快捷栏）
                 if (isMounted) {
+                    setGroups([]);
                     toaster.create({ type: 'error', title: '获取功能列表失败', description: '请检查网络后重试' });
                 }
             } finally {
@@ -140,6 +143,8 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
             const head = knownNames.join('、');
             const tail = unknown > 0 ? ` 等 ${vanished.length} 个功能` : '';
             toaster.create({ type: 'warning', title: '部分功能已失效', description: `${head}${tail} 在后端已不存在，未能添加` });
+            // 剪掉幽灵键：它们不在任何分组里、无法被取消勾选，不剪会每次确认都重复弹「无名」警告
+            setSelected(new Set(seen));
         }
         modal.resolve(items);
         void modal.hide();
@@ -179,7 +184,7 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                                 return (
                                     <Box key={g.areaKey} mb={4}>
                                         <Flex align="center" justify="space-between" mb={1} px={1}>
-                                            <Text fontSize="sm" fontWeight="bold" color={g.areaName === '危险' ? 'red.fg' : 'fg.muted'}>
+                                            <Text fontSize="sm" fontWeight="bold" color={g.areaName === DANGEROUS_AREA_NAME ? 'red.fg' : 'fg.muted'}>
                                                 {g.areaName}
                                             </Text>
                                             <Checkbox

@@ -364,6 +364,9 @@ export function NotifyWatcher(): null {
     return null;
 }
 
+/** 危险分区的显示名（后端约定）：快捷按钮 dangerous 标记、危险确认弹窗、Picker 染色共用此常量 */
+export const DANGEROUS_AREA_NAME = '危险';
+
 /** 安全解析后端错误文案，避免 Blob/.text 抛错或 [object Object]（自 Config.tsx 迁入，通用工具） */
 export async function getErrorDescription(err: unknown, fallback = '网络错误'): Promise<string> {
     const data = (err as { response?: { data?: unknown } })?.response?.data;
@@ -462,7 +465,11 @@ export async function importConfigFile(opts: {
     const { alias, rawCfg, areas, onFavWriteFailed } = opts;
     let configs: Record<string, Record<string, ConfigValue>>;
     try {
-        configs = JSON.parse(decodeURIComponent(atob(rawCfg.trim()))) as Record<string, Record<string, ConfigValue>>;
+        const parsed: unknown = JSON.parse(decodeURIComponent(atob(rawCfg.trim())));
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            throw new Error('bad');
+        }
+        configs = parsed as Record<string, Record<string, ConfigValue>>;
     } catch {
         throw new Error('配置文件格式无效，请检查选取的配置文件。');
     }
@@ -494,11 +501,14 @@ export async function importConfigFile(opts: {
     if (Object.keys(uploadConfig).length === 0) {
         throw new Error('文件中没有可用配置，未做任何修改。');
     }
-    // 全部成功后才写收藏（PUT 失败不覆盖现有收藏）；文件不含 _fav_（旧版导出）时不动收藏
+    // 全部成功后才写收藏（PUT 失败不覆盖现有收藏）；文件不含 _fav_（旧版导出）时不动收藏。
+    // 收藏按「文件里出现的区服」合并写回：文件没覆盖的区服（如文件是别的号导出的）保留既有收藏，不整表替换
     await putAccountConfigs(alias, uploadConfig);
     if (Object.keys(importedFav).length > 0) {
         try {
-            localStorage.setItem(favKey(alias), JSON.stringify(importedFav));
+            const raw = localStorage.getItem(favKey(alias));
+            const existing = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+            localStorage.setItem(favKey(alias), JSON.stringify({ ...existing, ...importedFav }));
         } catch {
             onFavWriteFailed?.();
         }

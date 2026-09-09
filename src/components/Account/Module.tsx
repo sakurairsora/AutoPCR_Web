@@ -12,7 +12,7 @@ import NiceModal from '@ebay/nice-modal-react';
 import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag, favKey, safeGetItem } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem, DANGEROUS_AREA_NAME } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -73,7 +73,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
     };
     const { open: isExpanded, onToggle: onToggleExpand } = useDisclosure({ defaultOpen: false });
     const dangerConfirm = useDisclosure();
-    const isDangerous = areaName === '危险';
+    const isDangerous = areaName === DANGEROUS_AREA_NAME;
 
     const handleToggleFav = async (e: React.MouseEvent) => {
         e.stopPropagation();

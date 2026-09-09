@@ -56,6 +56,7 @@ export function AccountInfo({
     const [displayName, setDisplayName] = useState(() => getDisplayName(alias));
     const [nameDraft, setNameDraft] = useState(displayName);
     const composingRef = useRef(false);
+    const commitNameRef = useRef<() => void>(() => {}); // setTimeout 兜底用：直接捕获 commitDisplayName 会拿到事件时刻旧闭包（nameDraft 旧值）
     const nameInputRef = useRef<HTMLInputElement>(null);
     // 批量清理的提示文案要在按下那一刻取最新显示名；登记只看账号原名
     const displayNameRef = useRef(displayName);
@@ -137,6 +138,11 @@ export function AccountInfo({
     }, [alias]);
 
     const handleDeleteAccount = () => {
+        // 忙碌互斥：执行中账号不可删（结果未回，删了也会留下悬挂状态）
+        if (busyRef.current) {
+            toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
+            return;
+        }
         delAccount(alias)
             .then((res) => {
                 toaster.create({ type: 'success', title: '删除账号成功', description: res });
@@ -205,6 +211,7 @@ export function AccountInfo({
         setDisplayName(next);
         setIsEditingName(false);
     };
+    commitNameRef.current = commitDisplayName; // 每渲染同步：setTimeout 兜底永远调用最新闭包
 
     // 始终同一 Input：可编辑区域与名字位置重合
     const nameInput = (
@@ -235,7 +242,7 @@ export function AccountInfo({
                 const el = e.target as HTMLInputElement;
                 window.setTimeout(() => {
                     if (document.activeElement !== el) {
-                        commitDisplayName();
+                        commitNameRef.current();
                     }
                 }, 0);
             }}
@@ -245,7 +252,7 @@ export function AccountInfo({
                     // 组词中 blur：等 composition 结束后由上面的 timeout 处理；再兜底一次
                     window.setTimeout(() => {
                         if (!composingRef.current) {
-                            commitDisplayName();
+                            commitNameRef.current();
                         }
                     }, 0);
                     return;
@@ -280,6 +287,11 @@ export function AccountInfo({
         event.target.value = '';
         if (!file) return;
 
+        // 忙碌互斥：该账号正有动作（清理/快捷执行）时拒绝导入，防两个写操作并发打后端
+        if (busyRef.current) {
+            toaster.create({ type: 'warning', title: '该账号正在执行中，请等待执行完毕' });
+            return;
+        }
         buttonLoading.onOpen();
         onBusyRef.current?.(alias, true);
         busyRef.current = true; // 导入期间登记忙：批量动作跳过本账号（互斥对称）
@@ -287,10 +299,14 @@ export function AccountInfo({
             const rawCfg = await file.text();
             // 区服名单现查（弹窗版用 props 传入的 areas，流程本体在 accountShared.importConfigFile）
             const accountDetail = await getAccount(alias);
+            const areas = accountDetail?.area || [];
+            if (areas.length === 0) {
+                throw new Error('该账号暂无可用区服，无法导入配置');
+            }
             await importConfigFile({
                 alias,
                 rawCfg,
-                areas: accountDetail?.area || [],
+                areas,
                 onFavWriteFailed: () => toaster.create({ type: 'warning', title: '配置已导入，但收藏标记保存失败（本地存储不可用）' }),
             });
             toaster.create({ type: 'success', title: '配置导入成功' });

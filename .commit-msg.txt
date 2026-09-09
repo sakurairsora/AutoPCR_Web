@@ -1,5 +1,22 @@
-fix: 导入配置期间登记 busy（互斥对称）
+fix: 第五轮审计修复（P1 全部 6 项 + P2 8 项）
 
-- 导入配置（卡片版）进入即 onBusyChange(alias,true)+busyRef 置位，finally 对称复位：
-  批量动作在导入期间跳过该账号，不再两边同时打后端；清理日常同样补 busyRef 置位/复位（原只查不写，
-  导入中点清理拦不住的窗口闭合）
+P1：
+- 详情窗取键 free[0] 与判定 stillFree[0] 不一致：二次剔除生效时 B 的结果静默丢失 → 统一 stillFree[0]
+- 导入互斥只置位不检查：入口补 busy 守卫（清理/快捷执行中拒绝导入）；删除账号同样补守卫
+- useConfigSaveFlow 回滚快照固定：连点场景后笔乐观值被踩、UI/服务器永久 desync → 回滚前校验父级值仍等于本笔乐观值（与 Module 批量守卫同思路）
+- $account 换号重置 effect 漏 popupOn：A 关掉的开关态错误带到 B → 补 setPopupOn(loadPopupFlag(account))
+- Picker 拉取失败不清 groups：陈旧列表可确认写回（后端已下线功能混进快捷栏）→ catch 清空
+- 失效 key 永驻 selected：此后每次确认弹无名幽灵警告 → 确认时剪枝幽灵键（可见勾选照旧，符合保留裁决）
+
+P2：
+- 批次剔除 effect 把 accounts 缺失当空集：瞬时异常永久抹掉星标批次 → accounts 为 null 直接返回
+- 丢「账号无区服」守卫：迁移中消失 → 卡片导入路径补回
+- 收藏整表覆盖：文件没覆盖的区服收藏被静默清空 → 按 JSON 合并保留既有
+- JSON.parse 结果不校验：null/数组穿透出英文 TypeError → 运行时形状检查
+- BATCH_RUNNER 渲染排除不对称：单卡可勾虚拟账号直打后端 → 两处渲染循环改用 selectableNames
+- dangerous/危险 魔法值三处 → DANGEROUS_AREA_NAME 常量；loadQuickActions 的 dangerous 只认显式 true
+- 空目标误报「都在执行中」：无账号时提示「请先创建一个账号」（与 Picker 分流）
+- 批次 toast 计数虚报：改用实际差值
+- IME 兜底 setTimeout 捕获旧闭包：commitNameRef 稳定转发最新 commitDisplayName
+- daily_clean_time 补进 AccountResponse 接口，$account 六处 as any 清除
+- DashBoard 双 @api/Account import 合并（putUserInfo 实为活代码：改密码在用，审计该条误报）
