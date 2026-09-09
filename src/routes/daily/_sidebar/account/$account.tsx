@@ -141,15 +141,10 @@ function AccountComponent() {
         try {
             const res = await postAccountAreaDaily(a);
             void emitDailyFinished(a);
-            // 全局副作用放守卫前：A 清理成功这个事实与「用户切到哪」无关，不因切号丢失
+            // 以下三个都是「操作结果告知/全局标记」：与用户切到哪无关，不因切号丢失（与失败 toast 口径对称）
             sessionStorage.setItem('autopcr_need_refresh_dashboard', '1');
-            if (accountRef.current !== a) return; // 换号了：晚到结果不写新页面（loading 由重置 effect 兜底）
             const resAny = res as { daily_clean_time?: { status?: string } | null; status?: string } | undefined;
             const st = resAny?.daily_clean_time?.status || resAny?.status || '';
-
-            setCleanStatus(st);
-            await refreshAccountData();
-
             if (st === '错误') {
                 toaster.create({ type: 'error', title: `${nameForUi}清日常结束` });
             } else if (st === '警告' || st === '中止') {
@@ -157,6 +152,11 @@ function AccountComponent() {
             } else {
                 toaster.create({ type: 'success', title: `${nameForUi}清日常成功` });
             }
+            if (accountRef.current !== a) return; // 换号了：晚到结果不写新页面（loading 由重置 effect 兜底）
+
+            setCleanStatus(st);
+            await refreshAccountData();
+
             if (popupOn && accountRef.current === a) { // 换号后不弹：A 的结果窗不盖在 B 页上（审计六 P2-1）
                 getAccountDailyResultList(a)
                     .then((resList) => {

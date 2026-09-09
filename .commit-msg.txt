@@ -1,24 +1,6 @@
-fix: 第七轮审计修复（自审轮回归 5 项 + P3 六项 + 三条裁决落地）
+fix: 第八轮自查——第七轮 commit 复审两处小修
 
-P2（上轮修复引入的回归）：
-- $account 弹结果分支漏守卫：结果列表 .then/.catch 首行补 accountRef 比对，A 的结果窗不再盖在 B 页
-- useConfigState 回滚显示用渲染闭包 propValue → 改消费回调入参 prev（链式失败时闭包值是错的）
-- lastConfirmedRef 外部更新判定：从「无在途才跟进」改为值比较（值≠在途 payload 即跟进），慢网保存期间的导入/同步值能被正确采纳
-- 补充键分支复活非法值：realImportByModule 返回 schemaKeys（含被校验拒绝的键），补充键跳过 schema 接管的键——"99:99"/1.5/字符串"true" 不再直通 PUT
-- 同步路径清缓存：ConfigSyncModal 每目标 PUT 成功后 clearAreaConfigCache（与导入路径同族同修）
-
-P3：
-- 世代闸罩住 finally：reset 后晚到请求不再误删新世代 inflight 登记
-- sessionStorage 全局副作用移到守卫前（A 清理成功不因切号丢失刷新标记）
-- 卡片四按钮 disabled={isBusy}：批量执行中导入不再要走完文件选择器才被拒
-- Info.tsx 漏网 BATCH_RUNNER 字面量 + 渲染期裸读 localStorage 改 getDisplayName（隐私模式不白屏）
-- 同步弹窗忙碌命中单列 skipCount，汇总 toast 不再把跳过谎报成失败
-- 弹结果勾选 safeSetItem 失败提示（不再静默）
-
-裁决落地：
-- A（用户：忙碌不能 clear，账号级行为）：撤销 reset 与卸载两处 busyAccountsRef.clear，忙碌跨导航/登录存活，晚到 finally 自愈
-- B（ModuleSyncModal 同口径）：确认时过滤忙碌目标（它是选择器，PUT 在调用方，选择时点即互斥点）
-- C（401 污染兜底）：NotifyWatcher 挂载即 resetNotifyWatcherState，跨登录 seen 污染无条件闭合
-- Area.handleConfigUpdate 契约核实：值原引用透传（浅拷贝外壳），Multi 回滚守卫引用比较成立；注释固化防将来深拷贝
-
-误报再次证伪：putUserInfo（改密码 L197 在用）、delAccount（批量删号 L654 在用）——审计#7 连续第三轮误报
+- useConfigState 死参数 transform 删除：两个调用点（Bool/SingleSelect）均无映射需求，
+  留着会诱惑将来误用——误用正好踩中回滚 setState(prev as T) 的类型空间错位
+- $account 清理结果 toast 移守卫前：结果告知（成功/警告/错误）与失败 toast 口径对称，
+  A 的清理结果无论用户切到哪都应被告知；守卫只挡页面状态写（cleanStatus/refresh）与结果窗

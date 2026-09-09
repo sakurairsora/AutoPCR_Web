@@ -135,7 +135,6 @@ function useConfigState<T>(
     key: string,
     propValue: T,
     onConfigUpdate?: (key: string, value: ConfigValue) => void,
-    transform?: (val: T) => ConfigValue,
 ) {
     const [state, setState] = useState<T>(propValue);
     const { commit } = useConfigSaveFlow(alias, key, propValue as ConfigValue, onConfigUpdate);
@@ -146,10 +145,9 @@ function useConfigState<T>(
 
     const save = async (newValue: T): Promise<void> => {
         setState(newValue);
-        const payload = transform ? transform(newValue) : (newValue as ConfigValue);
         // 必须用回调入参 prev（最后确认值）：闭包 propValue 是渲染时快照，链式失败时可能已是别的值——
         // 回滚显示错值正是 lastConfirmedRef 要消灭的 desync 显示态版本
-        await commit(payload, { onRollbackDisplay: (prev) => setState(prev as T) });
+        await commit(newValue as ConfigValue, { onRollbackDisplay: (prev) => setState(prev as T) });
     };
 
     return [state, setState, save] as const;
