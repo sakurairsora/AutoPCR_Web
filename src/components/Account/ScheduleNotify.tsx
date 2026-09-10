@@ -78,7 +78,7 @@ function todayStr(): string {
 const CATEGORY_ORDER = [
     '活动', '女神祭', '庆典', '扭蛋', '免费十连',
     '公会战', '特别地下城', '新斗技场', '季卡驾车游',
-    '露娜塔', '次元断层', '深渊讨伐战',
+    '露娜塔', '次元断层', '深渊讨伐战', '赛马',
 ];
 
 function categorySortIndex(c: string): number {
@@ -102,8 +102,8 @@ function shortDate(d: string): string {
 /** 后端条目归一化：女神祭从「活动」拆为独立类别；丢弃纯噪声（玩家经验值加成/公会战排名公示——类别也不出现在面板）；fes 扭蛋折叠 */
 function normalizeEntry(e: ScheduleEntry): ScheduleEntry | null {
     if (isNoiseEntry(e)) return null;
-    // 类别删除（用户裁决）：斗技场/登录奖励/赛马不再出现
-    if (e.category === '斗技场' || e.category === '登录奖励' || e.category === '赛马') return null;
+    // 类别删除（用户裁决）：斗技场/登录奖励不再出现
+    if (e.category === '斗技场' || e.category === '登录奖励') return null;
     // 驾车游并入季卡（用户裁决：季卡与驾车游是同一个东西）
     if (e.category === '季卡' || e.category === '驾车游') {
         return { ...e, category: '季卡驾车游' };
