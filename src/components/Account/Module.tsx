@@ -11,8 +11,9 @@ import Config, { enqueueConfigSave, getErrorDescription } from './Config';
 import NiceModal from '@ebay/nice-modal-react';
 import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
+import { clearAreaConfigCache } from './Area';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag, favKey, safeGetItem, DANGEROUS_AREA_NAME, busyAccountsRef } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem, safeSetItem, DANGEROUS_AREA_NAME, busyAccountsRef } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -97,9 +98,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
         }
 
         favMap[areaKey] = Array.from(areaFavs);
-        try {
-            localStorage.setItem(favKeyValue, JSON.stringify(favMap));
-        } catch {
+        if (!safeSetItem(favKeyValue, JSON.stringify(favMap))) {
             toaster.create({ type: 'error', title: '收藏保存失败', description: '本地存储不可用或已满' });
             return;
         }
@@ -192,6 +191,8 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
         }
 
         onOpen();
+        // 互斥入网：源账号登记（ModuleSyncModal 只过滤不登记），PUT 前逐目标复查（弹窗确认期间目标可能开始执行）
+        busyAccountsRef.add(alias);
         try {
             const moduleRes = await getAccountConfig(alias, "daily");
             if (!moduleRes.config) {
@@ -220,9 +221,15 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
             let successCount = 0;
             let failCount = 0;
+            let skipCount = 0;
             for (const targetAccount of normalizedTargets) {
+                if (busyAccountsRef.has(targetAccount)) {
+                    skipCount++; // 忙碌=跳过不记失败（与配置同步弹窗同口径）
+                    continue;
+                }
                 try {
                     await putAccountConfigs(targetAccount, filteredConfig);
+                    clearAreaConfigCache(targetAccount); // 失效目标 Area 缓存，防旧值回写冲掉刚同步的配置
                     successCount++;
                 } catch (e) {
                     console.error(`Error syncing to ${targetAccount}`, e);
@@ -231,15 +238,17 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             }
 
             if (failCount === 0) {
-                toaster.create({ type: 'success', title: `成功同步 ${info?.name} 到 ${successCount} 个账号` });
+                const skipNote = skipCount > 0 ? `，跳过(执行中): ${skipCount}` : '';
+                toaster.create({ type: 'success', title: `成功同步 ${info?.name} 到 ${successCount} 个账号${skipNote}` });
             } else {
-                toaster.create({ type: 'warning', title: `同步部分完成`, description: `成功: ${successCount}, 失败: ${failCount}` });
+                toaster.create({ type: 'warning', title: `同步部分完成`, description: `成功: ${successCount}, 失败: ${failCount}${skipCount > 0 ? `, 跳过: ${skipCount}` : ''}` });
             }
         } catch (err: unknown) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             toaster.create({ type: 'error', title: '同步过程中发生错误', description: errorMessage });
         } finally {
             onClose();
+            busyAccountsRef.delete(alias); // 本笔是源账号登记的唯一作者，直接清
         }
     }
 

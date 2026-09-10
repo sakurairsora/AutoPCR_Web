@@ -519,6 +519,11 @@ export async function importConfigFile(opts: {
     const uploadConfig: Record<string, ConfigValue> = {};
     const importedFav: Record<string, string[]> = {};
 
+    // 阶段一：全区 schema 校验 + 收集 schema 接管键的「全区并集」。
+    // 并集是必须的：uploadConfig 跨区扁平累积，若两区 schema 不一致，A 区被拒的 schema 键
+    // 可能在阶段二被当成「补充键」经 B 区的局部 schemaKeys 放行（审计十 #11）
+    const allSchemaKeys = new Set<string>();
+    const areaAccepted: { areaKey: string; accepted: Record<string, ConfigValue> }[] = [];
     configItems.forEach((value, index) => {
         const areaKey = areas[index].key;
         const areaConfig = configs[areaKey];
@@ -526,18 +531,25 @@ export async function importConfigFile(opts: {
         if (typeof areaConfig !== 'object' || areaConfig === null || Array.isArray(areaConfig)) return;
 
         const { accepted, schemaKeys } = realImportByModule(value, areaConfig);
+        areaAccepted.push({ areaKey, accepted });
         Object.assign(uploadConfig, accepted);
+        schemaKeys.forEach((k) => allSchemaKeys.add(k));
+    });
 
-        // 收藏标记 + schema 外补充键。schemaKeys = schema 实际接管的键（含被校验拒绝的）：
-        // 被拒的非法值（"99:99"、1.5、字符串 "true"）不得经补充键复活直通 PUT；
-        // 真正的 schema 外补充键只放行原始值（对象/数组不属于配置值）
+    // 阶段二：收藏标记 + schema 外补充键（用全区并集判定）。被校验拒绝的非法值
+    // （"99:99"、1.5、字符串 "true"）在任何区都不得经补充键复活直通 PUT
+    areas.forEach((area) => {
+        const areaKey = area.key;
+        const areaConfig = configs[areaKey];
+        if (typeof areaConfig !== 'object' || areaConfig === null || Array.isArray(areaConfig)) return;
+
         for (const key in areaConfig) {
             if (key.startsWith('_fav_')) {
                 importedFav[areaKey] = importedFav[areaKey] || [];
                 if (areaConfig[key] === true) {
                     importedFav[areaKey].push(key.slice(5));
                 }
-            } else if (!schemaKeys.has(key) && uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
+            } else if (!allSchemaKeys.has(key) && uploadConfig[key] === undefined && areaConfig[key] !== undefined) {
                 const v = areaConfig[key];
                 if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
                     uploadConfig[key] = v;

@@ -24,7 +24,7 @@ interface AccountInfoProps {
     isTableView?: boolean;
     isSelected?: boolean;
     onToggleSelect?: () => void;
-    /** 自动批次（多"默认账号"）名单：成员卡片显示"默认"标 */
+    /** 自动批次（星标批次）：成员卡片显示"星标"标（纯本地名单，与后端默认账号无关） */
     batchAccounts?: string[];
     onOpenSyncConfig?: (alias: string) => void;
     /** 该账号是否有动作正在执行（转圈=忙，其他动作不可对其生效） */
@@ -62,11 +62,10 @@ export function AccountInfo({
     // 批量清理的提示文案要在按下那一刻取最新显示名；登记只看账号原名
     const displayNameRef = useRef(displayName);
     displayNameRef.current = displayName;
-    // 忙碌状态与登记回调经 ref 取最新值，避免闭包过期。
-    // busyRef = 父级 busy ∨ 本地动作（导入/删除/清理）：本地置位经 localBusyRef，父级渲染回写不再把它洗掉
-    const localBusyRef = useRef(false);
-    const busyRef = useRef(isBusy || false);
-    busyRef.current = isBusy || localBusyRef.current;
+    // 显示名重同步跳过位：存储写失败后保住本地新名（见 commitDisplayName）
+    const skipDisplayResyncRef = useRef(false);
+    // 忙碌真源 = busyAccountsRef（模块级，跨页存活）；互斥判定一律 has(alias)，父级登记经 onBusyRef。
+    // 旧的 busyRef/localBusyRef 镜像已删：真源换读法后无读者，且与 busyAccountsRef 一词之差极易误读（审计十 #10）
     const onBusyRef = useRef(onBusyChange);
     onBusyRef.current = onBusyChange;
 
@@ -84,6 +83,11 @@ export function AccountInfo({
                 : { color: 'gray' as const, icon: <FiActivity />, label: cleanStatus };
 
     useEffect(() => {
+        // 重同步跳过位：存储写失败时本地已显示新名，不从存储读回旧值（否则闪一下又弹回，与注释意图相反）
+        if (skipDisplayResyncRef.current) {
+            skipDisplayResyncRef.current = false;
+            return;
+        }
         const latest = getDisplayName(alias);
         setDisplayName(latest);
         if (!isEditingName) setNameDraft(latest);
@@ -96,8 +100,7 @@ export function AccountInfo({
             return;
         }
         buttonLoading.onOpen();
-        onBusyRef.current?.(alias, true);
-        localBusyRef.current = true; // 清理等本地动作同以 busyRef 为互斥源（父级经 onBusyChange 登记真源）
+        onBusyRef.current?.(alias, true); // 本地动作登记真源：批量/同步/详情页全经 busyAccountsRef 互斥
         const nameForUi = displayNameRef.current || alias;
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
         try {
@@ -124,7 +127,6 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
-            localBusyRef.current = false;
         }
     };
 
@@ -149,7 +151,7 @@ export function AccountInfo({
         }
         // 删除在途同样登记忙碌：否则这几百 ms 里清理/导入/二次删除可并发发起，晚到的清理响应还会把已删账号写回成幽灵行
         onBusyRef.current?.(alias, true);
-        localBusyRef.current = true;
+        onBusyRef.current?.(alias, true);
         delAccount(alias)
             .then((res) => {
                 toaster.create({ type: 'success', title: '删除账号成功', description: res });
@@ -163,7 +165,6 @@ export function AccountInfo({
                 });
             })
             .finally(() => {
-                localBusyRef.current = false;
                 onBusyRef.current?.(alias, false);
             });
     };
@@ -219,8 +220,9 @@ export function AccountInfo({
             return;
         }
         if (!safeSetItem(DISPLAY_NAME_KEY(alias), next)) {
-            // 存储不可用：明说，别让新名字闪一下又静默弹回旧值
-            toaster.create({ type: 'warning', title: '显示名保存失败', description: '本地存储不可用，本次修改不会保留' });
+            // 存储不可用：明说。本地保留新名（会话内有效），并跳过下一次重同步（否则 effect 会读回旧值，闪一下又弹回）
+            toaster.create({ type: 'warning', title: '显示名保存失败', description: '本地存储不可用，本次修改仅本次会话内有效' });
+            skipDisplayResyncRef.current = true;
         }
         setDisplayName(next);
         setIsEditingName(false);
@@ -307,8 +309,7 @@ export function AccountInfo({
             return;
         }
         buttonLoading.onOpen();
-        onBusyRef.current?.(alias, true);
-        localBusyRef.current = true; // 导入期间登记忙：批量动作跳过本账号（互斥对称）
+        onBusyRef.current?.(alias, true); // 导入期间登记忙：批量动作跳过本账号（互斥对称）
         try {
             const rawCfg = await file.text();
             // 区服名单现查（弹窗版用 props 传入的 areas，流程本体在 accountShared.importConfigFile）
@@ -344,7 +345,6 @@ export function AccountInfo({
         } finally {
             buttonLoading.onClose();
             onBusyRef.current?.(alias, false);
-            localBusyRef.current = false;
         }
     };
 

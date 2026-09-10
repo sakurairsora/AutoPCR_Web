@@ -72,8 +72,10 @@ function useConfigSaveFlow(
     const inflightRef = useRef<{ payload: ConfigValue; token: object } | null>(null);
     useEffect(() => {
         // 回显判定用值比较而非「是否有在途」：有在途但 propValue 不等于在途 payload = 外部更新（导入/同步），也要跟进；
-        // 只跳过「恰好等于在途 payload」的乐观回显。旧写法（有在途就一律跳过）会让慢网保存期间到达的外部值永不跟进
-        if (valueRef.current !== inflightRef.current?.payload && valueRef.current !== lastConfirmedRef.current) {
+        // 只跳过「恰好等于在途 payload」的乐观回显。无在途时必须显式判定（inflight !== null）：
+        // ?.payload 的 undefined 会让「外部把值更新为 undefined」（bulk 回滚真实形态）被误判成回显而跳过跟进
+        if (inflightRef.current !== null && valueRef.current === inflightRef.current.payload) return; // 自己的乐观回显
+        if (valueRef.current !== lastConfirmedRef.current) {
             lastConfirmedRef.current = valueRef.current;
         }
     }, [propValue]);
@@ -102,7 +104,12 @@ function useConfigSaveFlow(
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
-            lastConfirmedRef.current = payload; // 保存成功：推进最后确认值
+            // 推进守卫：仅当父级当前值仍等于本笔 payload 才推进 lastConfirmed——
+            // 在途期间 bulk 直写父级 V2（外部更新判定已跟进 lastConfirmed=V2）后本笔成功，
+            // 无条件推进会把它覆盖回 V1，此后 effect 不再触发，V1 永久 stale
+            if (valueRef.current === payload) {
+                lastConfirmedRef.current = payload;
+            }
             if (inflightRef.current?.token === token) inflightRef.current = null; // 后笔在途时保留标记
             if (mountedRef.current) {
                 toaster.create({ type: 'success', title: '保存成功', description: res });

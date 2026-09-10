@@ -165,7 +165,8 @@ function AccountComponent() {
             setCleanStatus(st);
             await refreshAccountData();
 
-            if (popupOn && accountRef.current === a) { // 换号后不弹：A 的结果窗不盖在 B 页上（审计六 P2-1）
+            // 完成时刻现读存储（与 Module/DashBoard 姊妹路径同语义）：勾选在长任务在途期间可交互，点击时快照会违背用户刚表达的意愿
+            if (loadPopupFlag(a) && accountRef.current === a) { // 换号后不弹：A 的结果窗不盖在 B 页上（审计六 P2-1）
                 getAccountDailyResultList(a)
                     .then((resList) => {
                         if (accountRef.current !== a) return; // 结果列表在途时切号：同样丢弃

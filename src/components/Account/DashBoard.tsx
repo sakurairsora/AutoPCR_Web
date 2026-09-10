@@ -14,7 +14,7 @@ import {
 import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
-import { clearAccounts, delAccount, deleteAccount, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
+import { clearAccounts, delAccount, deleteAccount, getAccount, getAccountConfig, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
 import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { ResultInfo } from '@interfaces/UserInfo';
@@ -40,7 +40,7 @@ import { NotifySettings } from './accountShared';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -56,6 +56,9 @@ function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, self
 
 export function DashBoard() {
     const [userInfo, setUserInfo] = useState<UserInfoResponse>();
+    // 账号列表加载失败态：与「真没账号」区分（后者引导建号，前者给重试）。Area 的 error 态 + retryTick 同款
+    const [loadError, setLoadError] = useState(false);
+    const [retryTick, setRetryTick] = useState(0);
     const freshAccountInfo = useDisclosure();
     const creatAccountSwitch = useDisclosure();
     const deleteQQConfirm = useDisclosure();
@@ -75,10 +78,8 @@ export function DashBoard() {
     const [batchAccounts, setBatchAccounts] = useState<string[]>(() => loadBatch());
     // 「弹结果」：功能按钮执行完自动弹出结果汇总窗
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
-    // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效
+    // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效。互斥判定读模块真源 busyAccountsRef，此处 state 只做 UI 派生
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
-    const busyRef = useRef(busyAccounts);
-    busyRef.current = busyAccounts;
     const setAccountBusy = (name: string, busy: boolean) => {
         setBusyAccounts((prev) => {
             const next = new Set(prev);
@@ -91,6 +92,51 @@ export function DashBoard() {
         else busyAccountsRef.delete(name);
     };
     const quickActionsLoadedOnce = useRef(false);
+    // 危险标记 reconcile（审计十 #6）：本地缓存的 dangerous/ 来自 Picker 确认时的快照，后端把功能重分类进/出危险分区后
+    // 旧缓存会失真（危险按钮无确认直执行 / 普通按钮白弹确认）。挂载后用 Picker 同源数据（getAccount + 各区 config）修正一次
+    const quickActionsReconciled = useRef(false);
+    useEffect(() => {
+        if (quickActionsReconciled.current || quickActions.length === 0) return;
+        const refAlias = userInfo?.accounts?.find((acc) => acc.name !== BATCH_RUNNER)?.name;
+        if (!refAlias) return;
+        quickActionsReconciled.current = true;
+        (async () => {
+            try {
+                const detail = await getAccount(refAlias);
+                const areas = detail?.area || [];
+                const dangerKeys = new Set<string>();
+                const nameByKey = new Map<string, string>();
+                const aliveKeys = new Set<string>();
+                for (const area of areas) {
+                    const res = await getAccountConfig(refAlias, area.key);
+                    for (const k of res?.order || []) {
+                        const m = res?.info?.[k];
+                        if (!m || !m.implemented || !m.runnable) continue;
+                        aliveKeys.add(k);
+                        nameByKey.set(k, m.name);
+                        if (area.name === DANGEROUS_AREA_NAME) dangerKeys.add(k);
+                    }
+                }
+                setQuickActions((prev) => {
+                    let changed = false;
+                    const next = prev
+                        .filter((b) => aliveKeys.has(b.key)) // 后端已下线：从快捷栏剔除（与 Picker 打开时同口径）
+                        .map((b) => {
+                            const name = nameByKey.get(b.key) ?? b.name;
+                            const dangerous = dangerKeys.has(b.key);
+                            if (b.name === name && b.dangerous === dangerous) return b;
+                            changed = true;
+                            return { ...b, name, dangerous };
+                        });
+                    return changed ? next : prev;
+                });
+            } catch {
+                // 拉取失败静默：缓存值继续用（下次挂载再试——reconciled 只在成功路径置位？不，上面已置位。
+                // 失败时复位，让下次挂载重试）
+                quickActionsReconciled.current = false;
+            }
+        })();
+    }, [userInfo?.accounts]);
     useEffect(() => {
         // 首次挂载不回写：原值刚 load 出来，写了也是白写（隐私模式还会白弹"保存失败"）
         if (quickActionsLoadedOnce.current) {
@@ -155,14 +201,18 @@ export function DashBoard() {
     useEffect(() => {
         getUserInfo()
             .then((res) => {
+                // accounts 缺失（200 但载荷不完整）不当成空名单：勾选/批次整体清空会让批量写作用域静默升级为「全体账号」
+                if (!res.accounts) return;
+                setLoadError(false);
                 setUserInfo(res);
                 // 列表刷新后剔除选中里已不存在的账号（删除/清除后不再残留）
                 setSelectedAccounts((prev) => prev.filter((name) => res.accounts?.some((acc) => acc.name === name)));
             })
             .catch(async (err: AxiosError) => {
+                setLoadError(true); // 区分「加载失败」（可重试）与「真没账号」（引导建号）
                 toaster.create({ type: 'error', title: '获取账号失败', description: await getErrorDescription(err) });
             });
-    }, [freshAccountInfo.open]);
+    }, [freshAccountInfo.open, retryTick]);
 
     // 星标状态：勾选的账号全部已在批次里才算"亮"
     const selectedInBatch = selectedAccounts.length > 0 && selectedAccounts.every((name) => batchAccounts.includes(name));
@@ -240,8 +290,12 @@ export function DashBoard() {
         const free = targets.filter((name) => !busyAccountsRef.has(name));
         const busy = targets.filter((name) => busyAccountsRef.has(name));
         if (targets.length === 0) {
-            // 没有目标与「都在忙」是两回事：前者引导建号，后者才让等
-            toaster.create({ type: 'info', title: '请先创建一个账号' });
+            // 三种成因分开说：加载失败给重试出口（工具栏不再谎报「执行全部账号」引导用户去建号），真没账号才引导建号
+            if (loadError) {
+                toaster.create({ type: 'warning', title: '账号列表加载失败', description: '请用列表区的重试按钮' });
+            } else {
+                toaster.create({ type: 'info', title: '请先创建一个账号' });
+            }
             return null;
         }
         if (free.length === 0) {
@@ -315,8 +369,10 @@ export function DashBoard() {
                 }
             }),
         );
-        // 单账号 + 弹结果总开关开 + 该账号开了弹结果标记：只弹详情窗，不叠汇总窗（总开关关=只 toast，详情窗也不弹）
-        const singleDetail = popupResult && stillFree.length === 1 && loadPopupFlag(stillFree[0]) && outcomes.get(stillFree[0])?.ok && outcomes.get(stillFree[0])?.res;
+        // 单账号 + 弹结果总开关开 + 该账号开了弹结果标记：只弹详情窗，不叠汇总窗。
+        // res 是数组：空数组按「无结果行」处理走汇总窗（[] 是真值，直接当条件会吞汇总窗、弹空白详情窗）
+        const detailRes = outcomes.get(stillFree[0])?.res;
+        const singleDetail = popupResult && stillFree.length === 1 && loadPopupFlag(stillFree[0]) && outcomes.get(stillFree[0])?.ok && Array.isArray(detailRes) && detailRes.length > 0;
         if (popupResult && !singleDetail) {
             const rows: ResultSummaryRow[] = stillFree.map((name) => {
                 const o = outcomes.get(name);
@@ -513,21 +569,21 @@ export function DashBoard() {
                             {selectedAccounts.length > 0
                                 ? '只执行勾选账号'
                                 : batchAccounts.length > 0
-                                    ? '只执行默认账号'
+                                    ? '只执行星标批次'
                                     : '执行全部账号'}
                         </Text>
                     </Box>
                     <Button
                         size="sm"
-                        px={textFitPadding('设默认号')}
-                        colorPalette="purple"
+                        px={textFitPadding('加入星标批次')}
+                        colorPalette="amber"
                         variant={selectedInBatch ? 'solid' : 'ghost'}
                         borderWidth="1px"
                         borderColor="currentColor"
                         onClick={handleToggleBatchForSelected}
-                        title="点选账号可设置默认账号，可决定哪些账号默认使用主页快捷动作。"
+                        title="把勾选的账号加入/移出星标批次（纯本地名单，作为未勾选时的执行目标；与后端默认账号无关）"
                     >
-                        <FiStar /> 设默认号
+                        <FiStar /> 星标批次
                     </Button>
                     <Button
                         size="sm"
@@ -759,7 +815,15 @@ export function DashBoard() {
                             </Table.Row>
                         </Table.Header>
                         <Table.Body>
-                            {!userInfo ? (
+                            {loadError && !userInfo ? (
+                                // 加载失败态：与「真没账号」区分，给重试出口（Area 的 error + retryTick 同款）
+                                <Table.Row bg="transparent">
+                                    <Table.Cell colSpan={5} px={3} py={8} textAlign="center">
+                                        <Text color="fg.muted" mb={3}>账号列表加载失败，请检查网络后重试</Text>
+                                        <Button size="sm" variant="outline" onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+                                    </Table.Cell>
+                                </Table.Row>
+                            ) : !userInfo ? (
                                 Array.from({ length: 5 }).map((_, i) => (
                                     <Table.Row key={i} bg="transparent">
                                         <Table.Cell px={3} py={2}><Skeleton height="20px" width="20px" /></Table.Cell>
@@ -804,7 +868,14 @@ export function DashBoard() {
                         </Checkbox>
                     </Box>
                     <SimpleGrid gap={4} templateColumns="repeat(auto-fill, minmax(280px, 1fr))">
-                        {!userInfo ? (
+                        {loadError && !userInfo ? (
+                            <Card.Root bg="bg.panel" borderRadius="2xl" shadow="sm">
+                                <Card.Body py={8} textAlign="center">
+                                    <Text color="fg.muted" mb={3}>账号列表加载失败，请检查网络后重试</Text>
+                                    <Button size="sm" variant="outline" onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+                                </Card.Body>
+                            </Card.Root>
+                        ) : !userInfo ? (
                             Array.from({ length: 4 }).map((_, i) => (
                                 <Card.Root key={i} bg="bg.panel" borderRadius="2xl" shadow="sm">
                                     <Card.Header><Skeleton height="24px" width="50%" /></Card.Header>

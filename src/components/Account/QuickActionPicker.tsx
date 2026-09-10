@@ -39,6 +39,8 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
     const [selected, setSelected] = useState<Set<string>>(() => new Set(current.map((b) => b.key)));
     const [searchText, setSearchText] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    // 失败重试：递增触发重新拉取
+    const [reloadTick, setReloadTick] = useState(0);
 
     useEffect(() => {
         if (!modal.visible || !alias) return;
@@ -89,7 +91,7 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
             isMounted = false;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [modal.visible, alias]);
+    }, [modal.visible, alias, reloadTick]);
 
     const q = searchText.trim().toLowerCase();
     const filtered = useMemo(
@@ -216,7 +218,15 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
                                     </Box>
                                 );
                             })}
-                        {!isLoading && filtered.length === 0 && (
+                        {!isLoading && fetchFailed && (
+                            // 失败态专属文案 + 重试：与「合法空列表」（可确认清空）在行为层和视觉层都分流，
+                            // 否则想清空按钮的用户会误以为功能已全下线（审计十 #8）
+                            <Flex direction="column" alignItems="center" gap={3} py={6}>
+                                <Text color="fg.muted" fontSize="sm">功能列表获取失败，请检查网络后重试</Text>
+                                <Button size="sm" variant="outline" onClick={() => setReloadTick((t) => t + 1)}>重试</Button>
+                            </Flex>
+                        )}
+                        {!isLoading && !fetchFailed && filtered.length === 0 && (
                             <Text color="fg.muted" fontSize="sm" py={4} textAlign="center">
                                 无匹配功能
                             </Text>
