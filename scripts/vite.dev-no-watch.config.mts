@@ -24,6 +24,15 @@ export default defineConfig(({ mode }) => {
       watch: { ignored: ['**/autopcr/**', '**/audit/**', '**/scripts/**'] },
       hmr: false,
     },
+    resolve: {
+      alias: {
+        '@': path.resolve(process.cwd(), 'src'),
+        '@api': path.resolve(process.cwd(), 'src/api'),
+        '@components': path.resolve(process.cwd(), 'src/components'),
+        '@interfaces': path.resolve(process.cwd(), 'src/interfaces'),
+        '@routes': path.resolve(process.cwd(), 'src/routes'),
+      },
+    },
     define: { APP_VERSION: JSON.stringify(version) },
     plugins: [react(), TanStackRouterVite()],
   };

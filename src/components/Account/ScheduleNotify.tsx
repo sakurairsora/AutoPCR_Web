@@ -296,7 +296,7 @@ export function ScheduleNotifySettings() {
             </Popover.Trigger>
             <Popover.Positioner>
                 <Popover.Content width="340px" maxH="70vh" display="flex" flexDirection="column" overflow="hidden" zIndex={1400}>
-                    <Popover.Body p={3} overflowY="auto" flex="1 1 auto" minH="0">
+                    <Popover.Body p={3} overflowY="auto" overscrollBehavior="contain" flex="1 1 auto" minH="0">
                         <Stack gap={3}>
                             {/* 进行中（勾选类别）常驻区——唯一滚动区 */}
                             <Box>
