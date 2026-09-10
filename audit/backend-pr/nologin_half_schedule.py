@@ -13,4 +13,6 @@
                 self._log("\n====未来日程====")
             self._log(f"{st} - {ed}")
             for msg in schedules[time]:
+                if msg.startswith('fes|'):
+                    msg = msg[4:]  # 剥离 fes 标记（API 契约字段，半月刊渲染不带前缀，保持 parity）
                 self._log(f"    {msg}")

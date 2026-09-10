@@ -18,9 +18,9 @@ Discord 讨论定案：半月刊（half_schedule, `autopcr/module/modules/nologi
    - nologin_half_schedule.py 的 do_task → 替换 autopcr/module/modules/nologin.py
      half_schedule 类里现有的 do_task（schedule_sources 静态方法可保留，已无消费者，也可一并删）
 4. 本地验证：
-   - python -c "from autopcr.db.database import db; e=db.schedule_entries(); print(len(e), e[0])"
-     （应输出条目数与第一条字段化日程，渲染文本与半月刊一致）
-   - 跑一次半月刊 module，输出应与改动前逐行一致（排序键相同：start_time 字符串序）
+   - python -c "from autopcr.db.dbstart import db_start; db_start(); from autopcr.db.database import db; e=db.schedule_entries(); print(len(e), e[0])"
+     （必须先 db_start()：lazy_property 在 dbmgr 未初始化时直接抛 ValueError；db_start 会连带拉起登录依赖，属预期）
+   - 跑一次半月刊 module，输出应与改动前逐行一致（排序键 (start, end, 源清单顺序)，组内顺序=源清单顺序）
 5. httpserver.py 加只读端点（不挂 login_required 装饰器即为公开，与 /validate 同风格；
    注意 /clan_forbid 其实带 login+admin，别学它）：
    @self.api.route('/schedule', methods=["GET"])
