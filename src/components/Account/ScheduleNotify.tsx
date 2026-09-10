@@ -74,10 +74,10 @@ function todayStr(): string {
     return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
 }
 
-/** 全部类别的固定展示顺序（未知类别追加在尾部） */
+/** 全部类别的固定清单与展示顺序（面板勾选区固定全量显示，与数据有无无关） */
 const CATEGORY_ORDER = [
-    '活动', '复刻活动', '庆典', '扭蛋', '免费十连',
-    '公会战', '公会战排名公示', '特别地下城', '新斗技场', '斗技场',
+    '活动', '女神祭', '庆典', '扭蛋', '免费十连',
+    '公会战', '特别地下城', '新斗技场', '斗技场',
     '露娜塔', '次元断层', '深渊讨伐战', '驾车游', '季卡', '赛马', '登录奖励',
 ];
 
@@ -99,9 +99,31 @@ function shortDate(d: string): string {
 }
 
 /** 拉取日程（后端未部署 /schedule 时 fetch 404 → 抛错由调用方静默） */
+/** 后端条目归一化：女神祭从「活动」拆为独立类别；丢弃纯噪声（玩家经验值加成/公会战排名公示——类别也不出现在面板）；fes 扭蛋折叠 */
+function normalizeEntry(e: ScheduleEntry): ScheduleEntry | null {
+    if (isNoiseEntry(e)) return null;
+    if (e.category === '活动' && /女神祭/.test(e.description)) {
+        return { ...e, category: '女神祭' };
+    }
+    // fes 扭蛋折叠（用户裁决）：后端以 fes| 前缀标记 fes 池——只保留第一人，其余总结为 fes扭蛋
+    if (e.category === '扭蛋' && e.description.startsWith('fes|')) {
+        const body = e.description.slice(4);
+        if (body.startsWith('up ')) {
+            const names = body.slice(3).split(',').map((s) => s.trim()).filter(Boolean);
+            if (names.length > 1) {
+                return { ...e, description: `up ${names[0]} fes扭蛋` };
+            }
+            return { ...e, description: body };
+        }
+        return { ...e, description: body };
+    }
+    return e;
+}
+
 async function fetchSchedule(): Promise<ScheduleEntry[]> {
     const res = await API.get<ScheduleEntry[]>('/schedule');
-    return Array.isArray(res?.data) ? res.data : [];
+    const raw = Array.isArray(res?.data) ? res.data : [];
+    return raw.map(normalizeEntry).filter((e): e is ScheduleEntry => e !== null);
 }
 
 /* ==================== 全局 watcher（挂 _sidebar 布局层） ==================== */
@@ -232,11 +254,7 @@ export function ScheduleNotifySettings() {
         return Array.from(byCat.entries()).sort((a, b) => categorySortIndex(a[0]) - categorySortIndex(b[0]));
     }, [entries, prefs.categories, today]);
 
-    const allCategories = useMemo(() => {
-        const set = new Set<string>();
-        entries.forEach((e) => set.add(e.category));
-        return Array.from(set).sort((a, b) => categorySortIndex(a) - categorySortIndex(b));
-    }, [entries]);
+    const allCategories = useMemo(() => [...CATEGORY_ORDER], []);
 
     return (
         <Popover.Root lazyMount positioning={{ placement: 'bottom-end', gutter: 4 }}>

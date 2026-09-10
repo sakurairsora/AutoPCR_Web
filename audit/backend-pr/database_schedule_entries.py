@@ -40,6 +40,12 @@
                 schedule = factory(row)
                 if not schedule.enabled:
                     continue
+                desc = schedule.get_description()
+                # 扭蛋条目：官方池名 gacha_name 含 フェス/FES 判定为 fes 池，织入标记供通知侧折叠（只留第一人 + fes扭蛋）
+                if schedule.description == "扭蛋":
+                    gacha_name = getattr(row, 'gacha_name', '') or ''
+                    if ('フェス' in gacha_name) or ('FES' in gacha_name.upper()):
+                        desc = 'fes|' + desc
                 # key = 语义类别 + 来源主键（无主键表用行键）；同主键多来源（公会战/排名公示）加序号
                 base_key = ':'.join([schedule.description, str(row_key if key_field is None else getattr(row, key_field, row_key))])
                 counters[base_key] += 1
@@ -49,7 +55,7 @@
                     'category': schedule.description,
                     'start_time': self.format_date(self.parse_time(schedule.start_time)),
                     'end_time': self.format_date(self.parse_time(schedule.end_time)),
-                    'description': schedule.get_description(),
+                    'description': desc,
                 })
         entries.sort(key=lambda e: (e['start_time'], e['key']))
         return entries
