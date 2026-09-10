@@ -21,7 +21,8 @@ Discord 讨论定案：半月刊（half_schedule, `autopcr/module/modules/nologi
    - python -c "from autopcr.db.database import db; e=db.schedule_entries(); print(len(e), e[0])"
      （应输出条目数与第一条字段化日程，渲染文本与半月刊一致）
    - 跑一次半月刊 module，输出应与改动前逐行一致（排序键相同：start_time 字符串序）
-5. httpserver.py 加只读端点（与 /clan_forbid 同风格，无需登录）：
+5. httpserver.py 加只读端点（不挂 login_required 装饰器即为公开，与 /validate 同风格；
+   注意 /clan_forbid 其实带 login+admin，别学它）：
    @self.api.route('/schedule', methods=["GET"])
    async def get_schedule():
        return db.schedule_entries(), 200
@@ -35,11 +36,15 @@ Discord 讨论定案：半月刊（half_schedule, `autopcr/module/modules/nologi
 - key：稳定唯一（"类别:来源主键"，同主键多来源加 #序号），通知侧已读去重直接用它
 - category：半月刊渲染的类别名（公会战/特别地下城/新斗技场/庆典/活动/扭蛋/...）
 - start_time / end_time：YYYY/MM/DD（与半月刊渲染一致）
-- description：与半月刊逐行渲染完全相同的文本（up 名单、掉落倍率等都在这里面）
+- description：与半月刊逐行渲染完全相同的文本（up 名单、掉落倍率等都在这里面）；
+  扭蛋条目若 gacha_name 含 フェス/FES，前缀加 fes|（前端折叠为「up 首人 fes扭蛋」）
 
-## 前端侧约定（本仓库，等后端 API 合入后实现）
-- GET /daily/api/schedule（或后端定的实际路径）→ ScheduleEntry[]
-- NotifyWatcher 或独立 ScheduleWatcher 轮询（低频，如每 30 分钟）：
-  只关心 category ∈ {复刻活动相关, 特别地下城, 新斗技场, 公会战}（用户明确不要掉落/up 类庆典噪声——
-  category=庆典的条目按 description 前缀过滤，或后端在 schedule_entries 加 strict_category 字段）
-- 开启当天（start_time == 今天）且 localStorage 已读集合没有该 key → 浏览器通知 + 已读标记持久化
+## 前端侧状态（已在 AutoPCR_Web 实现，等后端 API 合入即切换）
+- GET /daily/api/schedule → ScheduleEntry[]（vite proxy 指向真后端即自动生效，前端零改动）
+- ScheduleNotifyWatcher（挂 _sidebar）+ 面板（DashBoard 工具栏）：
+  - 展示口径：end_time > 今天 的条目；噪声过滤（玩家经验值加成、公会战排名公示整类）
+  - 类别：固定清单 13 类（活动/女神祭/庆典/扭蛋/免费十连/公会战/特别地下城/新斗技场/季卡驾车游/露娜塔/次元断层/深渊讨伐战/赛马）；
+    驾车游并入季卡、斗技场/登录奖励前端不显示；女神祭由 description 含「女神祭」从活动拆出
+  - 扭蛋折叠：description 带 fes| 前缀（= gacha_name 含 フェス/FES，由后端 schedule_entries 织入）→「up 首人 fes扭蛋」；
+    普通长名单 →「up 前两名……等N人」
+- 通知：勾选类别条目 start_time == 今天 且到设定时刻 → 浏览器通知（每 key 当天一次，localStorage 已读 90 天自清理）
