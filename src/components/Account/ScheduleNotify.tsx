@@ -86,6 +86,18 @@ function categorySortIndex(c: string): number {
     return i === -1 ? CATEGORY_ORDER.length : i;
 }
 
+/** 纯噪声条目（用户裁决不列）：玩家经验值加成、公会战排名公示 */
+function isNoiseEntry(e: ScheduleEntry): boolean {
+    if (e.category === '公会战排名公示') return true;
+    return /玩家经验值/.test(e.description);
+}
+
+/** YYYY/MM/DD → MM/DD（面板展示只到月日） */
+function shortDate(d: string): string {
+    const m = /^\d{4}\/(\d{2}\/\d{2})$/.exec(d);
+    return m ? m[1] : d;
+}
+
 /** 拉取日程（后端未部署 /schedule 时 fetch 404 → 抛错由调用方静默） */
 async function fetchSchedule(): Promise<ScheduleEntry[]> {
     const res = await API.get<ScheduleEntry[]>('/schedule');
@@ -140,7 +152,7 @@ export function ScheduleNotifyWatcher(): null {
             const today = todayStr();
             // 刷新策略：缓存是今天的且没有「已结束但仍在缓存里」的勾选条目 → 不拉（活动结束时才更新一次）
             if (scheduleCache && scheduleCacheDay === today) {
-                const stale = scheduleCache.some((e) => prefs.categories.includes(e.category) && e.end_time < today);
+                const stale = scheduleCache.some((e) => prefs.categories.includes(e.category) && !isNoiseEntry(e) && e.end_time < today);
                 if (!stale) {
                     notifyTodaysStarts(scheduleCache, prefs);
                     return;
@@ -205,7 +217,12 @@ export function ScheduleNotifySettings() {
     const today = todayStr();
     /** 勾选类别中当前开放的条目（start<=today<=end），按类别分组 */
     const ongoing = useMemo(() => {
-        const chosen = entries.filter((e) => prefs.categories.includes(e.category) && e.start_time <= today && e.end_time >= today);
+        // 展示口径（用户裁决）：结束日期晚于今天即列出；纯噪声（玩家经验值加成/公会战排名公示）不列
+        const chosen = entries.filter((e) =>
+            prefs.categories.includes(e.category)
+            && e.end_time > today
+            && !isNoiseEntry(e),
+        );
         const byCat = new Map<string, ScheduleEntry[]>();
         for (const e of chosen) {
             const list = byCat.get(e.category) ?? [];
@@ -263,7 +280,7 @@ export function ScheduleNotifySettings() {
                                                 <Text fontSize="xs" fontWeight="bold" color="orange.500">{cat}</Text>
                                                 {list.map((e) => (
                                                     <Text key={e.key} fontSize="xs" color="fg.muted" title={e.description}>
-                                                        {e.description}　{e.start_time} - {e.end_time}
+                                                        {e.description}　{shortDate(e.start_time)} - {shortDate(e.end_time)}
                                                     </Text>
                                                 ))}
                                             </Box>
