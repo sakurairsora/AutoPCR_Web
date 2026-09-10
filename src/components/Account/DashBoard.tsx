@@ -36,11 +36,11 @@ import ResultSummaryModal, { ResultSummaryRow } from './ResultSummaryModal';
 import ResultInfoModal from './ResultInfoModal';
 import { loadQuickActions, saveQuickActions, QuickActionItem } from './quickActions';
 import { AccountInfo } from './AccountCard';
-import { NotifySettings } from './accountShared';
+import { ScheduleNotifySettings } from './ScheduleNotify';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, resetNotifyWatcherState, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -487,7 +487,6 @@ export function DashBoard() {
     const handleDeleteAccount = () => {
         deleteAccount()
             .then(async (res) => {
-                resetNotifyWatcherState(); // 跨登录清理：下一个登录者不被旧警报记录吞通知
                 toaster.create({ type: 'success', title: '删除QQ成功', description: res });
                 deleteQQConfirm.onToggle();
                 await navigate({ to: LoginRoute.to });
@@ -637,7 +636,7 @@ export function DashBoard() {
                         </Checkbox>
                     </Box>
                     <Box w="1px" h="1.25rem" bg="border.subtle" flexShrink={0} alignSelf="center" />
-                        <NotifySettings />
+                        <ScheduleNotifySettings />
                 </Flex>
 
                 <HStack gap={2}>
