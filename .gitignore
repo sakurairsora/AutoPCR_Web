@@ -28,3 +28,5 @@ stats.html
 
 # 本地审计导出
 audit/
+
+.commit-msg.txt
