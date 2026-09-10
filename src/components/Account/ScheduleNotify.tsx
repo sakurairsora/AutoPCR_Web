@@ -128,6 +128,7 @@ function normalizeEntry(e: ScheduleEntry): ScheduleEntry | null {
                 return { ...e, description: `up ${names[0]} fes扭蛋` };
             }
         }
+        // exchange_id=0 的池（description=官方池名）：剥掉标记只显池名
         return { ...e, description: body };
     }
     return e;
