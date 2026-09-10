@@ -140,6 +140,47 @@ async function fetchSchedule(): Promise<ScheduleEntry[]> {
     return raw.map(normalizeEntry).filter((e): e is ScheduleEntry => e !== null);
 }
 
+/**
+ * 面板滚动无缝接力（用户手感要求）：内层滚到顶/底后，滚轮剩余滚动量立即转嫁给外层滚动容器，
+ * 不经过浏览器默认的链式滚动（默认实现会先顿一拍再链出）。
+ * 内层还能滚时完全交给浏览器，不做任何干预。
+ * React 的 onWheel 是被动监听，preventDefault 无效，故用 ref + 原生非被动监听。
+ * 转嫁目标：从面板 Body 沿祖先向上找第一个「可滚动」（scrollHeight > clientHeight）的容器；
+ * daily 布局的页面滚动发生在 <Flex overflow='auto'> 内容区，不是 window。
+ */
+function useSeamlessScrollRelay() {
+    const scrollBodyRef = React.useRef<HTMLDivElement | null>(null);
+    React.useEffect(() => {
+        const el = scrollBodyRef.current;
+        if (!el) return;
+        const findOuterScroller = (): HTMLElement | null => {
+            let p = el.parentElement;
+            while (p) {
+                if (p.scrollHeight > p.clientHeight) {
+                    const oy = getComputedStyle(p).overflowY;
+                    if (oy === 'auto' || oy === 'scroll') return p;
+                }
+                p = p.parentElement;
+            }
+            return document.scrollingElement as HTMLElement | null;
+        };
+        const onWheel = (e: WheelEvent): void => {
+            const delta = e.deltaY;
+            if (delta === 0) return;
+            const atTop = el.scrollTop <= 0;
+            const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+            if ((delta < 0 && atTop) || (delta > 0 && atBottom)) {
+                e.preventDefault();
+                const outer = findOuterScroller();
+                if (outer) outer.scrollBy({ top: delta, behavior: 'auto' });
+            }
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+    return scrollBodyRef;
+}
+
 /* ==================== 全局 watcher（挂 _sidebar 布局层） ==================== */
 
 let scheduleCache: ScheduleEntry[] | null = null;
@@ -224,6 +265,7 @@ export function ScheduleNotifySettings() {
     const [prefs, setPrefs] = useState<ScheduleNotifyPrefs>(() => loadSchedulePrefs());
     const [entries, setEntries] = useState<ScheduleEntry[]>(() => scheduleCache ?? []);
     const [loadFailed, setLoadFailed] = useState(false);
+    const scrollBodyRef = useSeamlessScrollRelay();
 
     useEffect(() => {
         saveSchedulePrefs(prefs);
@@ -296,7 +338,7 @@ export function ScheduleNotifySettings() {
             </Popover.Trigger>
             <Popover.Positioner>
                 <Popover.Content width="340px" maxH="70vh" display="flex" flexDirection="column" overflow="hidden" zIndex={1400}>
-                    <Popover.Body p={3} overflowY="auto" overscrollBehavior="contain" flex="1 1 auto" minH="0">
+                    <Popover.Body ref={scrollBodyRef} p={3} overflowY="auto" flex="1 1 auto" minH="0">
                         <Stack gap={3}>
                             {/* 进行中（勾选类别）常驻区——唯一滚动区 */}
                             <Box>
