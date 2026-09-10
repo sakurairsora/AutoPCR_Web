@@ -27,6 +27,7 @@ stats.html
 .pnpm-store/
 
 # 本地审计导出
-audit/
+audit/*
+!audit/backend-pr/
 
 .commit-msg.txt
