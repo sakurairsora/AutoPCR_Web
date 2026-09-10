@@ -28,7 +28,7 @@ const rows = [
     { key: '庆典:9', category: '庆典', start_time: fmt(addDays(now, -3)), end_time: fmt(addDays(now, 12)), description: 'vh mana*2.0' },
     { key: '公会战排名公示:10', category: '公会战排名公示', start_time: fmt(addDays(now, -2)), end_time: fmt(addDays(now, 18)), description: '公会战排名公示' },
     { key: '新斗技场:11', category: '新斗技场', start_time: fmt(addDays(now, -2)), end_time: fmt(addDays(now, 2)), description: '新斗技场' },
-    { key: '扭蛋:12b', category: '扭蛋', start_time: today, end_time: fmt(addDays(now, 5)), description: 'fes|up 环奈,克莉丝提娜,凯留,,length远超一人的fes池' },
+    { key: '扭蛋:12b', category: '扭蛋', start_time: today, end_time: fmt(addDays(now, 5)), description: 'fes|up 千歌,星栞,妮妮,爱丽丝,优花梨' },
     { key: '扭蛋:12', category: '扭蛋', start_time: today, end_time: fmt(addDays(now, 7)), description: 'up 诗夏,紫罗兰,菲欧,格蕾丝,白菲,涅妃,银莲,els,琉璃,莱莱,机娘,坏女人,龙安,爱梅斯,咲哈哈,兰法,小小甜心,龙妈,星栞,风剑,白猫,火猫,晶,飞田,蝶妈,高达,似似花,611,克总' },
     { key: '庆典:13', category: '庆典', start_time: fmt(addDays(now, 5)), end_time: fmt(addDays(now, 10)), description: 'normal 掉落*3.0' },
     { key: '庆典:14', category: '庆典', start_time: fmt(addDays(now, 5)), end_time: fmt(addDays(now, 19)), description: '地下城 mana*2.0' },

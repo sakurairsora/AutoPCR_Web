@@ -77,8 +77,8 @@ function todayStr(): string {
 /** 全部类别的固定清单与展示顺序（面板勾选区固定全量显示，与数据有无无关） */
 const CATEGORY_ORDER = [
     '活动', '女神祭', '庆典', '扭蛋', '免费十连',
-    '公会战', '特别地下城', '新斗技场', '斗技场',
-    '露娜塔', '次元断层', '深渊讨伐战', '驾车游', '季卡', '赛马', '登录奖励',
+    '公会战', '特别地下城', '新斗技场', '季卡驾车游',
+    '露娜塔', '次元断层', '深渊讨伐战',
 ];
 
 function categorySortIndex(c: string): number {
@@ -102,18 +102,31 @@ function shortDate(d: string): string {
 /** 后端条目归一化：女神祭从「活动」拆为独立类别；丢弃纯噪声（玩家经验值加成/公会战排名公示——类别也不出现在面板）；fes 扭蛋折叠 */
 function normalizeEntry(e: ScheduleEntry): ScheduleEntry | null {
     if (isNoiseEntry(e)) return null;
+    // 类别删除（用户裁决）：斗技场/登录奖励/赛马不再出现
+    if (e.category === '斗技场' || e.category === '登录奖励' || e.category === '赛马') return null;
+    // 驾车游并入季卡（用户裁决：季卡与驾车游是同一个东西）
+    if (e.category === '季卡' || e.category === '驾车游') {
+        return { ...e, category: '季卡驾车游' };
+    }
     if (e.category === '活动' && /女神祭/.test(e.description)) {
         return { ...e, category: '女神祭' };
     }
-    // fes 扭蛋折叠（用户裁决）：后端以 fes| 前缀标记 fes 池——只保留第一人，其余总结为 fes扭蛋
+    // 扭蛋名单折叠（用户裁决）：fes| 前缀（gacha_name 含 フェス/FES 的池）→ up 首人 fes扭蛋；
+    // 普通池 up 名单 → 只显前两名，其余计「……等N人」
+    if (e.category === '扭蛋' && e.description.startsWith('up ')) {
+        const names = e.description.slice(3).split(',').map((s) => s.trim()).filter(Boolean);
+        if (names.length > 2) {
+            return { ...e, description: `up ${names[0]},${names[1]}……等${names.length}人` };
+        }
+        return e;
+    }
     if (e.category === '扭蛋' && e.description.startsWith('fes|')) {
         const body = e.description.slice(4);
         if (body.startsWith('up ')) {
             const names = body.slice(3).split(',').map((s) => s.trim()).filter(Boolean);
-            if (names.length > 1) {
+            if (names.length > 0) {
                 return { ...e, description: `up ${names[0]} fes扭蛋` };
             }
-            return { ...e, description: body };
         }
         return { ...e, description: body };
     }
@@ -281,10 +294,10 @@ export function ScheduleNotifySettings() {
                 </Box>
             </Popover.Trigger>
             <Popover.Positioner>
-                <Popover.Content width="340px" maxH="70vh" overflowY="auto" zIndex={1400}>
-                    <Popover.Body p={3}>
+                <Popover.Content width="340px" maxH="70vh" display="flex" flexDirection="column" overflow="hidden" zIndex={1400}>
+                    <Popover.Body p={3} overflowY="auto" flex="1 1 auto" minH="0">
                         <Stack gap={3}>
-                            {/* 进行中（勾选类别）常驻区 */}
+                            {/* 进行中（勾选类别）常驻区——唯一滚动区 */}
                             <Box>
                                 <Text fontSize="sm" fontWeight="bold" mb={1}>正在进行</Text>
                                 {ongoing.length === 0 ? (
@@ -306,6 +319,11 @@ export function ScheduleNotifySettings() {
                                     </Stack>
                                 )}
                             </Box>
+                        </Stack>
+                    </Popover.Body>
+                    {/* 固定底栏：通知开关/提醒时刻/类别勾选（不随上进行中列表滚动） */}
+                    <Box px={3} py={2} borderTopWidth="1px" borderTopColor="border.subtle" flexShrink={0}>
+                        <Stack gap={2}>
                             {/* 通知开关 + 提醒时刻 */}
                             <HStack gap={3}>
                                 <Checkbox
@@ -379,7 +397,7 @@ export function ScheduleNotifySettings() {
                                 </Button>
                             )}
                         </Stack>
-                    </Popover.Body>
+                    </Box>
                 </Popover.Content>
             </Popover.Positioner>
         </Popover.Root>
