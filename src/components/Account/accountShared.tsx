@@ -12,6 +12,23 @@ export const dailyCleanRegistry: Map<string, () => void | Promise<void>> = new M
 /** 全局忙碌表（模块级真源）：DashBoard setAccountBusy 时同步写；供弹窗等非父子组件查询互斥 */
 export const busyAccountsRef = new Set<string>();
 
+/** busy 变更订阅：patchBusy 时逐个通知（账号页从主页跟入时据此恢复转圈） */
+type BusyListener = () => void;
+const busyListeners = new Set<BusyListener>();
+
+export function subscribeBusyAccounts(fn: BusyListener): () => void {
+    busyListeners.add(fn);
+    return () => busyListeners.delete(fn);
+}
+
+/** busy 变更唯一入口：改表 + 广播。所有 busyAccountsRef.add/delete 都应走这里 */
+export function patchBusy(alias: string, busy: boolean): void {
+    const changed = busy ? !busyAccountsRef.has(alias) : busyAccountsRef.has(alias);
+    if (busy) busyAccountsRef.add(alias);
+    else busyAccountsRef.delete(alias);
+    if (changed) busyListeners.forEach((fn) => fn());
+}
+
 export const DISPLAY_NAME_KEY = (alias: string) => 'autopcr_displayName_' + alias;
 
 export function getDisplayName(alias: string): string {

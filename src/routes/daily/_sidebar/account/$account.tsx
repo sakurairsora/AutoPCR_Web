@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName, busyAccountsRef } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName, busyAccountsRef, patchBusy, subscribeBusyAccounts } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -34,6 +34,14 @@ function AccountComponent() {
     const [activeTab, setActiveTab] = useState<string>(initialTab);
     const [favOnlyMap, setFavOnlyMap] = useState<Record<string, boolean>>({});
     const [cleanLoading, setCleanLoading] = useState(false);
+
+    // 从主页跟入时恢复转圈：busy 真源在 busyAccountsRef（主页/模块运行登记），
+    // 订阅其变更让本页 loading 与全局 busy 同步（含运行结束清 busy 时同步熄灭）
+    useEffect(() => {
+        const sync = () => setCleanLoading(busyAccountsRef.has(account));
+        sync(); // 挂载/换号时先对齐一次（主页发起的运行可能已在进行）
+        return subscribeBusyAccounts(sync);
+    }, [account]);
 
     const [cleanStatus, setCleanStatus] = useState<string>(
         () => initialAccountInfo?.daily_clean_time?.status || '',
@@ -143,7 +151,7 @@ function AccountComponent() {
         }
         setCleanLoading(true);
         setCleanStatus('');
-        busyAccountsRef.add(a);
+        patchBusy(a, true);
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
 
         try {
@@ -189,7 +197,7 @@ function AccountComponent() {
             // 换号后 loading 交给重置 effect，这里不再碰（晚到 finally 会把 B 页的按钮状态搅乱）
             if (accountRef.current === a) setCleanLoading(false);
             // 本笔是该账号忙碌登记的唯一作者（互斥网保证执行期间无并发路径），直接清
-            busyAccountsRef.delete(a);
+            patchBusy(a, false);
         }
     };
 

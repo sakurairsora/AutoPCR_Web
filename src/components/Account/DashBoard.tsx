@@ -40,7 +40,7 @@ import { ScheduleNotifySettings } from './ScheduleNotify';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -87,9 +87,8 @@ export function DashBoard() {
             else next.delete(name);
             return next;
         });
-        // 模块级真源同步：ConfigSyncModal 等非父子组件靠它做忙碌互斥
-        if (busy) busyAccountsRef.add(name);
-        else busyAccountsRef.delete(name);
+        // 模块级真源同步：ConfigSyncModal 等非父子组件靠它做忙碌互斥；patchBusy 广播给订阅方（账号页转圈恢复）
+        patchBusy(name, busy);
     };
     const quickActionsLoadedOnce = useRef(false);
     // 危险标记 reconcile（审计十 #6）：本地缓存的 dangerous/ 来自 Picker 确认时的快照，后端把功能重分类进/出危险分区后
