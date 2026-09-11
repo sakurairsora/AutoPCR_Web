@@ -1,5 +1,5 @@
 import { Box, Button, Card, Flex, HStack, Heading, Separator, Stack, Tag, useDisclosure } from '@chakra-ui/react'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { ConfigValue, ModuleInfo } from '@interfaces/Module';
 import { FiChevronDown, FiCopy, FiStar } from 'react-icons/fi';
 import { getAccountAreaSingleResultList, postAccountAreaSingle, putAccountConfig, getAccountConfig, putAccountConfigs } from '@api/Account';
@@ -13,7 +13,7 @@ import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
 import { clearAreaConfigCache } from './Area';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag, favKey, safeGetItem, safeSetItem, DANGEROUS_AREA_NAME, busyAccountsRef, patchBusy, subscribeBusyAccounts, registerRun, unregisterRun } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem, safeSetItem, DANGEROUS_AREA_NAME, busyAccountsRef, patchBusy } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -32,13 +32,6 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
     /** 一键把炼成属性1-4全部设为同一属性（2物攻 4魔攻 12物贯 13法贯），乐观回写+失败回滚（仅还原仍等于乐观值的键，避免覆盖用户手改） */
     const bulkBusyRef = useRef(false);
     const [bulkBusy, setBulkBusy] = useState(false); // 视觉反馈：执行中按钮转圈+全组禁用
-    // 账号级忙态订阅：主页/清理/别的模块发起的运行也该让本卡按钮转圈（busy 真源在 busyAccountsRef）
-    const [accountBusy, setAccountBusy] = useState(() => busyAccountsRef.has(alias));
-    useEffect(() => {
-        const sync = () => setAccountBusy(busyAccountsRef.has(alias));
-        sync();
-        return subscribeBusyAccounts(sync);
-    }, [alias]);
     // 回滚判定要读“此刻”的配置：闭包里的 config 是 await 前的旧值，守卫会恒 false 导致回滚失效
     const configRef = useRef(config);
     configRef.current = config;
@@ -139,12 +132,10 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             toaster.create({ type: 'warning', title: '该账号正在执行中', description: '请等待当前操作完成' });
             return;
         }
-        const ac = new AbortController();
-        registerRun(alias, ac, 'module');
         patchBusy(alias, true);
         toaster.create({ type: 'info', title: '开始执行' + info?.name + "..." });
         onOpen();
-        postAccountAreaSingle(alias, info?.key, ac.signal).then(async (res) => {
+        postAccountAreaSingle(alias, info?.key).then(async (res) => {
             toaster.create({ type: 'success', title: '执行成功' });
             // 先解除 loading 再弹结果：无论结果窗怎么关，按钮圈都会正常结束
             onClose();
@@ -152,14 +143,9 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                 await NiceModal.show(ResultInfoModal, { alias: alias, title: info?.name, resultInfo: res });
             }
         }).catch(async (err: AxiosError) => {
-            if (ac.signal.aborted) {
-                toaster.create({ type: 'info', title: '已中断', description: '离开页面，动作已中止' });
-            } else {
-                toaster.create({ type: 'error', title: '执行失败', description: await getErrorDescription(err) });
-            }
+            toaster.create({ type: 'error', title: '执行失败', description: await getErrorDescription(err) });
         }).finally(() => {
             onClose();
-            unregisterRun(alias, ac);
             patchBusy(alias, false); // 本笔是唯一登记作者（入口已互斥），直接清
         });
     }
@@ -206,8 +192,6 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
         onOpen();
         // 互斥入网：源账号登记（ModuleSyncModal 只过滤不登记），PUT 前逐目标复查（弹窗确认期间目标可能开始执行）
-        const syncAc = new AbortController();
-        registerRun(alias, syncAc, 'sync');
         patchBusy(alias, true);
         try {
             const moduleRes = await getAccountConfig(alias, "daily");
@@ -264,7 +248,6 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             toaster.create({ type: 'error', title: '同步过程中发生错误', description: errorMessage });
         } finally {
             onClose();
-            unregisterRun(alias, syncAc);
             patchBusy(alias, false); // 本笔是源账号登记的唯一作者，直接清
         }
     }
@@ -326,13 +309,13 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                     </Box>
                     <HStack gap={{ base: 1, md: 2 }} flexShrink={0}>
                         {info?.runnable &&
-                            <Button size={{ base: 'xs', md: 'sm' }} variant="surface" colorPalette='blue' loading={isOpen || accountBusy} onClick={handleExecuteWrapper}>执行</Button>
+                            <Button size={{ base: 'xs', md: 'sm' }} variant="surface" colorPalette='blue' loading={isOpen} onClick={handleExecuteWrapper}>执行</Button>
                         }
                         {info?.runnable &&
-                            <Button size={{ base: 'xs', md: 'sm' }} variant="ghost" colorPalette='blue' loading={isOpen || accountBusy} onClick={handleResult}>结果</Button>
+                            <Button size={{ base: 'xs', md: 'sm' }} variant="ghost" colorPalette='blue' loading={isOpen} onClick={handleResult}>结果</Button>
                         }
                         {areaKey === 'daily' && (
-                            <Button size={{ base: 'xs', md: 'sm' }} variant="ghost" colorPalette='teal' loading={isOpen || accountBusy} onClick={handleSyncConfig} aria-label="同步配置"><FiCopy /></Button>
+                            <Button size={{ base: 'xs', md: 'sm' }} variant="ghost" colorPalette='teal' loading={isOpen} onClick={handleSyncConfig} aria-label="同步配置"><FiCopy /></Button>
                         )}
                         <Box color="fg.muted" transition="transform 0.2s" transform={isExpanded ? "rotate(180deg)" : "rotate(0deg)"}>
                             <FiChevronDown />

@@ -11,7 +11,7 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
+import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, delAccount, deleteAccount, getAccount, getAccountConfig, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
@@ -40,7 +40,7 @@ import { ScheduleNotifySettings } from './ScheduleNotify';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, subscribeBusyAccounts, abortRuns, registerRun, unregisterRun, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -74,7 +74,7 @@ export function DashBoard() {
     });
     const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
     const [quickActions, setQuickActions] = useState<QuickActionItem[]>(() => loadQuickActions());
-    // 自动批次（多"默认账号"）：星标加入/移出，未勾选时作为执行目标
+    // 默认账号名单：加入/移出，未勾选时作为执行目标
     const [batchAccounts, setBatchAccounts] = useState<string[]>(() => loadBatch());
     // 「弹结果」：功能按钮执行完自动弹出结果汇总窗
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
@@ -82,17 +82,6 @@ export function DashBoard() {
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
     // 挂载/订阅期全量镜像 busy 真源：主页可能晚于 patchBusy 广播挂载（账号页发起运行后回到主页），
     // 初始空 Set 会让卡片误显示非忙；订阅期广播到达时也全量重建，免维护增量
-    useEffect(() => {
-        const sync = () => setBusyAccounts(new Set(busyAccountsRef));
-        sync();
-        return subscribeBusyAccounts(sync);
-    }, []);
-    // 离开主页=终止（用户口径）：中断全部在途非日常动作（批量运行/同步配置），日常清理豁免
-    useEffect(() => {
-        return () => {
-            abortRuns('daily');
-        };
-    }, []);
     const setAccountBusy = (name: string, busy: boolean) => {
         setBusyAccounts((prev) => {
             const next = new Set(prev);
@@ -226,13 +215,13 @@ export function DashBoard() {
             });
     }, [freshAccountInfo.open, retryTick]);
 
-    // 星标状态：勾选的账号全部已在批次里才算"亮"
+    // 默认账号状态：勾选的账号全部已是默认才算"亮"
     const selectedInBatch = selectedAccounts.length > 0 && selectedAccounts.every((name) => batchAccounts.includes(name));
 
-    // 星标 = 把勾选的所有账号加入/移出自动批次（多"默认账号"，纯本地名单，动作目标用它，与后端默认账号无关）
+    // 默认账号 2 态切换：选中=把勾选账号全部设为默认；已全为默认=取消默认
     const handleToggleBatchForSelected = () => {
         if (selectedAccounts.length === 0) {
-            toaster.create({ type: 'info', title: '请先勾选账号', description: '星标用于把勾选的账号加入或移出自动批次' });
+            toaster.create({ type: 'info', title: '请先勾选账号', description: '用于把勾选的账号设为或取消默认账号' });
             return;
         }
         const allIn = selectedAccounts.every((name) => batchAccounts.includes(name));
@@ -243,7 +232,7 @@ export function DashBoard() {
         const delta = Math.abs(next.length - batchAccounts.length);
         toaster.create({
             type: 'success',
-            title: allIn ? `已将 ${delta} 个账号移出自动批次` : `已将 ${delta} 个账号加入自动批次`,
+            title: allIn ? `已取消 ${delta} 个默认账号` : `已将 ${delta} 个账号设为默认账号`,
         });
     };
 
@@ -294,10 +283,10 @@ export function DashBoard() {
     const selectableNames = useMemo(() => selectableAccounts.map((acc) => acc.name), [selectableAccounts]);
     const allSelected = selectedAccounts.length > 0 && selectedAccounts.length === selectableNames.length;
 
-    /** 批量目标解析（唯一实现）：勾选 > 自动批次 > 全体（排除 BATCH_RUNNER），忙碌切分+提示；无可执行目标时返回 null */
+    /** 批量目标解析（唯一实现）：勾选 > 默认账号 > 全体（排除 BATCH_RUNNER），忙碌切分+提示；无可执行目标时返回 null */
     const resolveTargets = (actionName: string): { free: string[]; targetDesc: string } | null => {
         const allNames = selectableNames;
-        const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '自动批次' : '全体账号';
+        const targetDesc = selectedAccounts.length > 0 ? '勾选账号' : batchAccounts.length > 0 ? '默认账号' : '全体账号';
         const targets = selectedAccounts.length > 0 ? selectedAccounts : batchAccounts.length > 0 ? batchAccounts : allNames;
         const free = targets.filter((name) => !busyAccountsRef.has(name));
         const busy = targets.filter((name) => busyAccountsRef.has(name));
@@ -329,7 +318,7 @@ export function DashBoard() {
         }
     };
 
-    // 自定义功能按钮：目标=勾选的账号 > 自动批次（没勾选时） > 全体（批次也为空时）；忙碌账号跳过；危险功能先确认
+    // 自定义功能按钮：目标=勾选的账号 > 默认账号（没勾选时） > 全体（默认账号也为空时）；忙碌账号跳过；危险功能先确认
     const handleQuickAction = async (btn: QuickActionItem) => {
         const resolved = resolveTargets(btn.name);
         if (!resolved) return;
@@ -369,21 +358,14 @@ export function DashBoard() {
         // 多账号同时执行同一动作：全并发（每账号一个独立请求，语义即"一起跑"；用户裁决不改）
         await Promise.all(
             stillFree.map(async (name) => {
-                const ac = new AbortController();
-                registerRun(name, ac, 'batch');
                 try {
-                    const res = await postAccountAreaSingle(name, btn.key, ac.signal);
+                    const res = await postAccountAreaSingle(name, btn.key);
                     outcomes.set(name, { ok: true, detail: '', res });
                     ok += 1;
                 } catch (err: any) {
-                    if (ac.signal.aborted) {
-                        outcomes.set(name, { ok: false, detail: '已中断（离开页面）', res: undefined });
-                    } else {
-                        outcomes.set(name, { ok: false, detail: await getErrorDescription(err), res: undefined });
-                    }
+                    outcomes.set(name, { ok: false, detail: await getErrorDescription(err), res: undefined });
                     fail += 1;
                 } finally {
-                    unregisterRun(name, ac);
                     setAccountBusy(name, false);
                 }
             }),
@@ -587,25 +569,24 @@ export function DashBoard() {
                             {selectedAccounts.length > 0
                                 ? '只执行勾选账号'
                                 : batchAccounts.length > 0
-                                    ? '只执行星标批次'
+                                    ? '只执行默认账号'
                                     : '执行全部账号'}
                         </Text>
                     </Box>
                     <Button
                         size="sm"
-                        px={textFitPadding('加入星标批次')}
-                        colorPalette="amber"
+                        px={textFitPadding('默认账号')}
+                        colorPalette="purple"
                         variant={selectedInBatch ? 'solid' : 'ghost'}
                         borderWidth="1px"
                         borderColor="currentColor"
                         onClick={handleToggleBatchForSelected}
-                        title="把勾选的账号加入/移出星标批次（纯本地名单，作为未勾选时的执行目标；与后端默认账号无关）"
                     >
-                        <FiStar /> 星标批次
+                        {selectedInBatch ? '取消默认' : '默认账号'}
                     </Button>
                     <Button
                         size="sm"
-                        px={textFitPadding(selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理批次日常' : '清理全部日常')}
+                        px={textFitPadding(selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理默认账号日常' : '清理全部日常')}
                         colorPalette="orange"
                         variant="ghost"
                         borderWidth="1px"
@@ -613,7 +594,7 @@ export function DashBoard() {
                         onClick={handleCleanDailyAll}
                         loading={busyAccounts.size > 0}
                     >
-                        <FiTarget /> {selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理批次日常' : '清理全部日常'}
+                        <FiTarget /> {selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理默认账号日常' : '清理全部日常'}
                     </Button>
                 </HStack>
 
@@ -863,7 +844,6 @@ export function DashBoard() {
                                         batchAccounts={batchAccounts}
                                         getOccupiedNames={occupiedNamesFactory}
                                         isBusy={busyAccounts.has(account.name)}
-                                        defaultAccount={userInfo?.default_account}
                                         onBusyChange={setAccountBusy}
                                         onOpenSyncConfig={(a) => {
                                             NiceModal.show(ConfigSyncModal, { sourceAccount: a });
@@ -915,7 +895,6 @@ export function DashBoard() {
                                     batchAccounts={batchAccounts}
                                     getOccupiedNames={occupiedNamesFactory}
                                     isBusy={busyAccounts.has(account.name)}
-                                    defaultAccount={userInfo?.default_account}
                                     onBusyChange={setAccountBusy}
                                     onOpenSyncConfig={(a) => {
                                         NiceModal.show(ConfigSyncModal, { sourceAccount: a });

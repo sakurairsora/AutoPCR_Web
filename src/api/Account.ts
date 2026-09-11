@@ -200,20 +200,18 @@ export async function putAccountConfigs(alias: string, configs: Record<string, C
   return response.data;
 }
 
-export async function postAccountAreaDaily(alias: string, signal?: AbortSignal) {
+export async function postAccountAreaDaily(alias: string) {
   const response = await API.post<AccountInfo>(`/account/${alias}/do_daily`, {}, {
     timeout: 10 * 60 * 1000,
-    signal,
   });
   return response.data;
 }
 
-export async function postAccountAreaSingle(alias: string, module: string, signal?: AbortSignal) {
+export async function postAccountAreaSingle(alias: string, module: string) {
   const response = await API.post<ResultInfo[]>(`/account/${alias}/do_single`, {
     order: module
   }, {
     timeout: 10 * 60 * 1000,
-    signal,
   });
   return response.data;
 }

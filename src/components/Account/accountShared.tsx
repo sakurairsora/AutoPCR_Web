@@ -9,52 +9,13 @@ import type { Candidate, ConfigType, ConfigValue, ModuleResponse } from '@interf
 /** 批量清理日常的注册表：alias → 该账号卡片的清理入口（DashBoard 全体清理按名调用） */
 export const dailyCleanRegistry: Map<string, () => void | Promise<void>> = new Map();
 
-/** 全局忙碌表（模块级真源）：DashBoard setAccountBusy 时同步写；供弹窗等非父子组件查询互斥 */
+/** 全局忙碌表（模块级真源）：互斥判定读它；UI 转圈由各页面本地状态自理（页面卸载即动作作废，无跨页同步） */
 export const busyAccountsRef = new Set<string>();
 
-/** busy 变更订阅：patchBusy 时逐个通知（账号页从主页跟入时据此恢复转圈） */
-type BusyListener = () => void;
-const busyListeners = new Set<BusyListener>();
-
-export function subscribeBusyAccounts(fn: BusyListener): () => void {
-    busyListeners.add(fn);
-    return () => busyListeners.delete(fn);
-}
-
-/**
- * 在途运行登记：alias → AbortController + 类别。
- * 语义（用户口径）：离开页面即中断在途动作（日常清理除外——8:30 定时任务的中断权不在页面生命周期手里）。
- * 中断 = abort 请求 → 各入口既有 catch/finally 链自然收尾（patchBusy(false)、转圈灭）。
- */
-export type RunKind = 'module' | 'sync' | 'batch' | 'daily';
-const runAbortRegistry = new Map<string, { ac: AbortController; kind: RunKind }>();
-
-export function registerRun(alias: string, ac: AbortController, kind: RunKind): void {
-    runAbortRegistry.set(alias, { ac, kind });
-}
-export function unregisterRun(alias: string, ac: AbortController): void {
-    // 只注销自己的登记（防晚到 finally 顶掉新运行登记）
-    const cur = runAbortRegistry.get(alias);
-    if (cur && cur.ac === ac) runAbortRegistry.delete(alias);
-}
-/** 中断指定账号的在途非日常动作；不传 alias = 全部。返回被中断的别名 */
-export function abortRuns(exclude?: 'daily', alias?: string): string[] {
-    const hit: string[] = [];
-    for (const [name, { ac, kind }] of runAbortRegistry) {
-        if (alias && name !== alias) continue;
-        if (exclude === 'daily' && kind === 'daily') continue;
-        ac.abort();
-        hit.push(name);
-    }
-    return hit;
-}
-
-/** busy 变更唯一入口：改表 + 广播。所有 busyAccountsRef.add/delete 都应走这里 */
+/** busy 变更唯一入口：改表。UI 不订阅（还原旧貌：跨页不联动） */
 export function patchBusy(alias: string, busy: boolean): void {
-    const changed = busy ? !busyAccountsRef.has(alias) : busyAccountsRef.has(alias);
     if (busy) busyAccountsRef.add(alias);
     else busyAccountsRef.delete(alias);
-    if (changed) busyListeners.forEach((fn) => fn());
 }
 
 export const DISPLAY_NAME_KEY = (alias: string) => 'autopcr_displayName_' + alias;
@@ -113,7 +74,7 @@ export function textFitPadding(label: string): string | undefined {
     return '0.25rem';
 }
 
-/** 自动批次名单（多"默认账号"），带版本号存本地 */
+/** 默认账号名单，带版本号存本地 */
 const BATCH_KEY = 'autopcr_batch_v1';
 
 export function loadBatch(): string[] {
