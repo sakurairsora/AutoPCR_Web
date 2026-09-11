@@ -40,7 +40,7 @@ import { ScheduleNotifySettings } from './ScheduleNotify';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, subscribeBusyAccounts, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -80,6 +80,13 @@ export function DashBoard() {
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
     // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效。互斥判定读模块真源 busyAccountsRef，此处 state 只做 UI 派生
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
+    // 挂载/订阅期全量镜像 busy 真源：主页可能晚于 patchBusy 广播挂载（账号页发起运行后回到主页），
+    // 初始空 Set 会让卡片误显示非忙；订阅期广播到达时也全量重建，免维护增量
+    useEffect(() => {
+        const sync = () => setBusyAccounts(new Set(busyAccountsRef));
+        sync();
+        return subscribeBusyAccounts(sync);
+    }, []);
     const setAccountBusy = (name: string, busy: boolean) => {
         setBusyAccounts((prev) => {
             const next = new Set(prev);
