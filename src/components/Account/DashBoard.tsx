@@ -11,7 +11,7 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
+import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, delAccount, deleteAccount, getAccount, getAccountConfig, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
@@ -582,7 +582,7 @@ export function DashBoard() {
                         borderColor="currentColor"
                         onClick={handleToggleBatchForSelected}
                     >
-                        {selectedInBatch ? '取消默认' : '默认账号'}
+                        <FiStar fill={selectedInBatch ? 'currentColor' : 'none'} /> {selectedInBatch ? '取消默认' : '默认账号'}
                     </Button>
                     <Button
                         size="sm"
