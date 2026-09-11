@@ -9,7 +9,7 @@ import ConfigImportExport from '@components/Account/ConfigImportExport.tsx';
 import Info from '@components/Account/Info';
 import { createFileRoute } from '@tanstack/react-router';
 import { getAccount, getAccountDailyResultList, postAccountAreaDaily } from '@api/Account';
-import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName, busyAccountsRef, patchBusy, subscribeBusyAccounts } from '@components/Account/accountShared';
+import { POPUP_FLAG_KEY, loadPopupFlag, emitDailyFinished, textFitPadding, safeSetItem, getDisplayName, busyAccountsRef, patchBusy, subscribeBusyAccounts, registerRun, unregisterRun, abortRuns } from '@components/Account/accountShared';
 import { getErrorDescription } from '@components/Account/Config';
 import { toaster } from '../../../../components/ui/toaster';
 import { Checkbox } from '../../../../components/ui/checkbox';
@@ -119,11 +119,12 @@ function AccountComponent() {
         if (st) setCleanStatus(st);
     }, [initialAccountInfo, account]);
 
-    // 离开本账号详情时清缓存
+    // 离开本账号详情时清缓存 + 中断在途非日常动作（用户口径：离开页面=终止；日常清理豁免）
     useEffect(() => {
         const alias = account;
         return () => {
             clearAreaConfigCache(alias);
+            abortRuns('daily', alias);
         };
     }, [account]);
 
@@ -152,6 +153,10 @@ function AccountComponent() {
         setCleanLoading(true);
         setCleanStatus('');
         patchBusy(a, true);
+        // 日常清理豁免「离开页面即中断」语义（用户口径：8:30 定时任务的中断权不随页面生命周期）。
+        // 仍登记为 daily 类别：卸载中断走 abortRuns('daily') 会跳过它
+        const dailyAc = new AbortController();
+        registerRun(a, dailyAc, 'daily');
         toaster.create({ type: 'info', title: `开始为${nameForUi}清理日常...` });
 
         try {
@@ -198,6 +203,7 @@ function AccountComponent() {
             if (accountRef.current === a) setCleanLoading(false);
             // 本笔是该账号忙碌登记的唯一作者（互斥网保证执行期间无并发路径），直接清
             patchBusy(a, false);
+            unregisterRun(a, dailyAc);
         }
     };
 

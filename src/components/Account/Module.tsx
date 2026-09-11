@@ -13,7 +13,7 @@ import ResultInfoModal from './ResultInfoModal';
 import ModuleSyncModal from './ModuleSyncModal';
 import { clearAreaConfigCache } from './Area';
 import { toaster } from '../../components/ui/toaster';
-import { loadPopupFlag, favKey, safeGetItem, safeSetItem, DANGEROUS_AREA_NAME, busyAccountsRef, patchBusy, subscribeBusyAccounts } from './accountShared';
+import { loadPopupFlag, favKey, safeGetItem, safeSetItem, DANGEROUS_AREA_NAME, busyAccountsRef, patchBusy, subscribeBusyAccounts, registerRun, unregisterRun } from './accountShared';
 
 interface ModuleProps extends React.ComponentProps<typeof Card.Root> {
     alias: string,
@@ -139,10 +139,12 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             toaster.create({ type: 'warning', title: '该账号正在执行中', description: '请等待当前操作完成' });
             return;
         }
+        const ac = new AbortController();
+        registerRun(alias, ac, 'module');
         patchBusy(alias, true);
         toaster.create({ type: 'info', title: '开始执行' + info?.name + "..." });
         onOpen();
-        postAccountAreaSingle(alias, info?.key).then(async (res) => {
+        postAccountAreaSingle(alias, info?.key, ac.signal).then(async (res) => {
             toaster.create({ type: 'success', title: '执行成功' });
             // 先解除 loading 再弹结果：无论结果窗怎么关，按钮圈都会正常结束
             onClose();
@@ -150,9 +152,14 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
                 await NiceModal.show(ResultInfoModal, { alias: alias, title: info?.name, resultInfo: res });
             }
         }).catch(async (err: AxiosError) => {
-            toaster.create({ type: 'error', title: '执行失败', description: await getErrorDescription(err) });
+            if (ac.signal.aborted) {
+                toaster.create({ type: 'info', title: '已中断', description: '离开页面，动作已中止' });
+            } else {
+                toaster.create({ type: 'error', title: '执行失败', description: await getErrorDescription(err) });
+            }
         }).finally(() => {
             onClose();
+            unregisterRun(alias, ac);
             patchBusy(alias, false); // 本笔是唯一登记作者（入口已互斥），直接清
         });
     }
@@ -199,6 +206,8 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
 
         onOpen();
         // 互斥入网：源账号登记（ModuleSyncModal 只过滤不登记），PUT 前逐目标复查（弹窗确认期间目标可能开始执行）
+        const syncAc = new AbortController();
+        registerRun(alias, syncAc, 'sync');
         patchBusy(alias, true);
         try {
             const moduleRes = await getAccountConfig(alias, "daily");
@@ -255,6 +264,7 @@ export default function Module({ alias, areaKey, areaName, config, info, isOpen,
             toaster.create({ type: 'error', title: '同步过程中发生错误', description: errorMessage });
         } finally {
             onClose();
+            unregisterRun(alias, syncAc);
             patchBusy(alias, false); // 本笔是源账号登记的唯一作者，直接清
         }
     }

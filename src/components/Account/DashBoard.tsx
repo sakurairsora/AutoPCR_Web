@@ -40,7 +40,7 @@ import { ScheduleNotifySettings } from './ScheduleNotify';
 
 import { getErrorDescription } from './Config';
 
-import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, subscribeBusyAccounts, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
+import { dailyCleanRegistry as handle, getDisplayName, loadBatch, saveBatch, loadPopupFlag, loadPopupMaster, textFitPadding, safeGetItem, safeSetItem, POPUP_MASTER_KEY, VIEW_MODE_KEY, busyAccountsRef, patchBusy, subscribeBusyAccounts, abortRuns, registerRun, unregisterRun, BATCH_RUNNER, DANGEROUS_AREA_NAME } from './accountShared';
 
 /** 收集其他账号已占用的显示名（含未自定义时的原始 alias） */
 function collectOccupiedNames(accounts: AccountInfoInterface[] | undefined, selfAlias: string): Set<string> {
@@ -86,6 +86,12 @@ export function DashBoard() {
         const sync = () => setBusyAccounts(new Set(busyAccountsRef));
         sync();
         return subscribeBusyAccounts(sync);
+    }, []);
+    // 离开主页=终止（用户口径）：中断全部在途非日常动作（批量运行/同步配置），日常清理豁免
+    useEffect(() => {
+        return () => {
+            abortRuns('daily');
+        };
     }, []);
     const setAccountBusy = (name: string, busy: boolean) => {
         setBusyAccounts((prev) => {
@@ -363,14 +369,21 @@ export function DashBoard() {
         // 多账号同时执行同一动作：全并发（每账号一个独立请求，语义即"一起跑"；用户裁决不改）
         await Promise.all(
             stillFree.map(async (name) => {
+                const ac = new AbortController();
+                registerRun(name, ac, 'batch');
                 try {
-                    const res = await postAccountAreaSingle(name, btn.key);
+                    const res = await postAccountAreaSingle(name, btn.key, ac.signal);
                     outcomes.set(name, { ok: true, detail: '', res });
                     ok += 1;
                 } catch (err: any) {
-                    outcomes.set(name, { ok: false, detail: await getErrorDescription(err), res: undefined });
+                    if (ac.signal.aborted) {
+                        outcomes.set(name, { ok: false, detail: '已中断（离开页面）', res: undefined });
+                    } else {
+                        outcomes.set(name, { ok: false, detail: await getErrorDescription(err), res: undefined });
+                    }
                     fail += 1;
                 } finally {
+                    unregisterRun(name, ac);
                     setAccountBusy(name, false);
                 }
             }),
@@ -850,6 +863,7 @@ export function DashBoard() {
                                         batchAccounts={batchAccounts}
                                         getOccupiedNames={occupiedNamesFactory}
                                         isBusy={busyAccounts.has(account.name)}
+                                        defaultAccount={userInfo?.default_account}
                                         onBusyChange={setAccountBusy}
                                         onOpenSyncConfig={(a) => {
                                             NiceModal.show(ConfigSyncModal, { sourceAccount: a });
@@ -901,6 +915,7 @@ export function DashBoard() {
                                     batchAccounts={batchAccounts}
                                     getOccupiedNames={occupiedNamesFactory}
                                     isBusy={busyAccounts.has(account.name)}
+                                    defaultAccount={userInfo?.default_account}
                                     onBusyChange={setAccountBusy}
                                     onOpenSyncConfig={(a) => {
                                         NiceModal.show(ConfigSyncModal, { sourceAccount: a });

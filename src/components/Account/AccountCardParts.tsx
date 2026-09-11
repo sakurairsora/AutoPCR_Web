@@ -22,12 +22,17 @@ export function RoundCheckbox({ checked, onToggle }: { checked?: boolean; onTogg
     );
 }
 
-/** 「星标」（本地批次成员）「公会战禁用」标签组。compact=表格行（禁用用 solid+全称），否则卡片（subtle+短词）。
- * 注意：星标=纯本地自动批次名单，与后端 default_account 无关（琥珀色与旧紫「默认」徽章刻意区隔，防老用户误解） */
-export function AccountTags({ isDefault, clanForbid, compact }: { isDefault: boolean; clanForbid?: boolean; compact?: boolean }) {
+/** 「默认」（后端 default_account，紫）「星标」（本地批次成员，琥珀）「公会战禁用」标签组。compact=表格行（禁用用 solid+全称），否则卡片（subtle+短词）。
+ * 默认与星标语义独立：默认=后端 default_account；星标=纯本地自动批次名单，两者可同时亮 */
+export function AccountTags({ isDefault, inBatch, clanForbid, compact }: { isDefault: boolean; inBatch: boolean; clanForbid?: boolean; compact?: boolean }) {
     return (
         <>
             {isDefault && (
+                <Tag.Root size="sm" p={0.5} colorPalette="purple" variant="solid" flexShrink={0}>
+                    <Tag.Label fontSize="2xs" lineHeight="1" whiteSpace="nowrap">默认</Tag.Label>
+                </Tag.Root>
+            )}
+            {inBatch && (
                 <Tag.Root size="sm" p={0.5} colorPalette="amber" variant="solid" flexShrink={0}>
                     <Tag.Label fontSize="2xs" lineHeight="1" whiteSpace="nowrap">星标</Tag.Label>
                 </Tag.Root>

@@ -24,8 +24,10 @@ interface AccountInfoProps {
     isTableView?: boolean;
     isSelected?: boolean;
     onToggleSelect?: () => void;
-    /** 自动批次（星标批次）：成员卡片显示"星标"标（纯本地名单，与后端默认账号无关） */
+    /** 自动批次（星标批次）：成员卡片显示“星标”标（纯本地名单，与后端默认账号无关） */
     batchAccounts?: string[];
+    /** 后端默认账号（userInfo.default_account）：匹配者显示紫色「默认」徽章 */
+    defaultAccount?: string;
     onOpenSyncConfig?: (alias: string) => void;
     /** 该账号是否有动作正在执行（转圈=忙，其他动作不可对其生效） */
     isBusy?: boolean;
@@ -41,6 +43,7 @@ export function AccountInfo({
     isSelected = false,
     onToggleSelect,
     batchAccounts = [],
+    defaultAccount,
     onOpenSyncConfig,
     isBusy,
     onBusyChange,
@@ -497,7 +500,7 @@ export function AccountInfo({
 
                             {/* 标签单独一组 flexShrink=0，避免反噬曾用名 */}
                             <Flex align="center" gap={1} flexShrink={0}>
-                                <AccountTags isDefault={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} compact />
+                                <AccountTags isDefault={!!defaultAccount && defaultAccount === account.name} inBatch={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} compact />
                             </Flex>
                         </Flex>
 
@@ -633,7 +636,7 @@ export function AccountInfo({
                         )}
 
                         <Flex align="center" gap={1} flexShrink={0} minW={0}>
-                            <AccountTags isDefault={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} />
+                            <AccountTags isDefault={!!defaultAccount && defaultAccount === account.name} inBatch={batchAccounts.includes(account.name)} clanForbid={account.clan_forbid} />
                         </Flex>
                     </Flex>
 

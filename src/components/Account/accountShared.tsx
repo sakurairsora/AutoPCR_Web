@@ -21,6 +21,34 @@ export function subscribeBusyAccounts(fn: BusyListener): () => void {
     return () => busyListeners.delete(fn);
 }
 
+/**
+ * 在途运行登记：alias → AbortController + 类别。
+ * 语义（用户口径）：离开页面即中断在途动作（日常清理除外——8:30 定时任务的中断权不在页面生命周期手里）。
+ * 中断 = abort 请求 → 各入口既有 catch/finally 链自然收尾（patchBusy(false)、转圈灭）。
+ */
+export type RunKind = 'module' | 'sync' | 'batch' | 'daily';
+const runAbortRegistry = new Map<string, { ac: AbortController; kind: RunKind }>();
+
+export function registerRun(alias: string, ac: AbortController, kind: RunKind): void {
+    runAbortRegistry.set(alias, { ac, kind });
+}
+export function unregisterRun(alias: string, ac: AbortController): void {
+    // 只注销自己的登记（防晚到 finally 顶掉新运行登记）
+    const cur = runAbortRegistry.get(alias);
+    if (cur && cur.ac === ac) runAbortRegistry.delete(alias);
+}
+/** 中断指定账号的在途非日常动作；不传 alias = 全部。返回被中断的别名 */
+export function abortRuns(exclude?: 'daily', alias?: string): string[] {
+    const hit: string[] = [];
+    for (const [name, { ac, kind }] of runAbortRegistry) {
+        if (alias && name !== alias) continue;
+        if (exclude === 'daily' && kind === 'daily') continue;
+        ac.abort();
+        hit.push(name);
+    }
+    return hit;
+}
+
 /** busy 变更唯一入口：改表 + 广播。所有 busyAccountsRef.add/delete 都应走这里 */
 export function patchBusy(alias: string, busy: boolean): void {
     const changed = busy ? !busyAccountsRef.has(alias) : busyAccountsRef.has(alias);
