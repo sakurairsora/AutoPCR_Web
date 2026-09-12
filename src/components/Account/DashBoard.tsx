@@ -586,7 +586,7 @@ export function DashBoard() {
                     </Button>
                     <Button
                         size="sm"
-                        px={textFitPadding(selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理默认账号日常' : '清理全部日常')}
+                        px={textFitPadding('清理全部日常')}
                         colorPalette="orange"
                         variant="ghost"
                         borderWidth="1px"
@@ -594,7 +594,7 @@ export function DashBoard() {
                         onClick={handleCleanDailyAll}
                         loading={busyAccounts.size > 0}
                     >
-                        <FiTarget /> {selectedAccounts.length > 0 ? '清理选中日常' : batchAccounts.length > 0 ? '清理默认账号日常' : '清理全部日常'}
+                        <FiTarget /> 清理全部日常
                     </Button>
                 </HStack>
 
