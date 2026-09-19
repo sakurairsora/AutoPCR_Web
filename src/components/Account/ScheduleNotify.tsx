@@ -149,9 +149,12 @@ async function fetchSchedule(): Promise<ScheduleEntry[]> {
  * daily 布局的页面滚动发生在 <Flex overflow='auto'> 内容区，不是 window。
  */
 function useSeamlessScrollRelay() {
-    const scrollBodyRef = React.useRef<HTMLDivElement | null>(null);
-    React.useEffect(() => {
-        const el = scrollBodyRef.current;
+    // 必须用回调 ref 而非 [] 依赖 effect：Popover lazyMount 下 Body 首次打开才挂载，
+    // effect 首跑时 ref 是 null 且 ref 赋值不触发重跑，监听器会永远注册不上
+    const cleanupRef = React.useRef<(() => void) | null>(null);
+    const scrollBodyRef = React.useCallback((el: HTMLDivElement | null) => {
+        cleanupRef.current?.();
+        cleanupRef.current = null;
         if (!el) return;
         const findOuterScroller = (): HTMLElement | null => {
             let p = el.parentElement;
@@ -176,8 +179,9 @@ function useSeamlessScrollRelay() {
             }
         };
         el.addEventListener('wheel', onWheel, { passive: false });
-        return () => el.removeEventListener('wheel', onWheel);
+        cleanupRef.current = () => el.removeEventListener('wheel', onWheel);
     }, []);
+    React.useEffect(() => () => cleanupRef.current?.(), []);
     return scrollBodyRef;
 }
 

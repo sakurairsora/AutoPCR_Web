@@ -151,7 +151,6 @@ export function AccountInfo({
         }
         // 删除在途同样登记忙碌：否则这几百 ms 里清理/导入/二次删除可并发发起，晚到的清理响应还会把已删账号写回成幽灵行
         onBusyRef.current?.(alias, true);
-        onBusyRef.current?.(alias, true);
         delAccount(alias)
             .then((res) => {
                 toaster.create({ type: 'success', title: '删除账号成功', description: res });

@@ -10,7 +10,7 @@ import {
 } from '../../components/ui/modal';
 import { Checkbox } from '../../components/ui/checkbox';
 import NiceModal, { useModal } from '@ebay/nice-modal-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getAccount, getAccountConfig } from '@api/Account';
 import { ModuleInfo } from '@interfaces/Module';
 import { Skeleton } from '../../components/ui/skeleton';
@@ -41,6 +41,15 @@ const QuickActionPicker = NiceModal.create(({ alias, current }: QuickActionPicke
     const [isLoading, setIsLoading] = useState(false);
     // 失败重试：递增触发重新拉取
     const [reloadTick, setReloadTick] = useState(0);
+
+    // 重开边沿重置（同 MultiSelectModal）：hide() 不卸载组件，取消/关闭后残留的勾选与搜索词
+    // 会污染下次打开的初始态——「取消」语义失效，误按确定会把实验态保存为正式按钮集
+    const lastVisibleRef = useRef(false);
+    if (modal.visible && !lastVisibleRef.current) {
+        setSelected(new Set(current.map((b) => b.key)));
+        setSearchText('');
+    }
+    lastVisibleRef.current = modal.visible;
 
     useEffect(() => {
         if (!modal.visible || !alias) return;

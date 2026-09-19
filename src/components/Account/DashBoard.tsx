@@ -11,7 +11,7 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiBook, FiCheck, FiGrid, FiKey, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
+import { FiBook, FiCheck, FiGrid, FiKey, FiLayers, FiList, FiPlus, FiStar, FiTarget, FiUpload, FiUserMinus, FiUserPlus, FiUserX } from 'react-icons/fi';
 import React, { ChangeEvent, useMemo, useRef } from 'react';
 import { Skeleton, SkeletonText } from '../../components/ui/skeleton';
 import { clearAccounts, delAccount, deleteAccount, getAccount, getAccountConfig, getUserInfo, postAccount, postAccountAreaSingle, postAccountImport, putUserInfo } from '@api/Account';
@@ -24,6 +24,7 @@ import { AxiosError } from 'axios';
 import { Checkbox } from '../../components/ui/checkbox';
 import { IconButton } from '../../components/ui/icon-button';
 import { Route as LoginRoute } from '@routes/daily/login';
+import { Route as DashBoardRoute } from '@routes/daily/_sidebar/account/index';
 import NiceModal from '@ebay/nice-modal-react';
 import ReadmeModal from './ReadmeModal';
 import { Tooltip } from '../../components/ui/tooltip';
@@ -78,10 +79,10 @@ export function DashBoard() {
     const [batchAccounts, setBatchAccounts] = useState<string[]>(() => loadBatch());
     // 「弹结果」：功能按钮执行完自动弹出结果汇总窗
     const [popupResult, setPopupResult] = useState<boolean>(() => loadPopupMaster());
-    // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效。互斥判定读模块真源 busyAccountsRef，此处 state 只做 UI 派生
+    // 账号忙碌登记：转圈=忙，其他动作不可对该账号生效（设计行为）。互斥判定读模块真源 busyAccountsRef，此处 state 只做 UI 派生
     const [busyAccounts, setBusyAccounts] = useState<Set<string>>(new Set());
-    // 挂载/订阅期全量镜像 busy 真源：主页可能晚于 patchBusy 广播挂载（账号页发起运行后回到主页），
-    // 初始空 Set 会让卡片误显示非忙；订阅期广播到达时也全量重建，免维护增量
+    // 跨页不同步（用户裁决）：本集合仅随本页动作登记/解除，主页重挂载后从空集开始；
+    // 在途动作的互斥由 busyAccountsRef 真源保证，转圈由发起页自己的 loading 呈现
     const setAccountBusy = (name: string, busy: boolean) => {
         setBusyAccounts((prev) => {
             const next = new Set(prev);
@@ -596,6 +597,20 @@ export function DashBoard() {
                     >
                         <FiTarget /> 清理全部日常
                     </Button>
+                    <Button
+                        size="sm"
+                        px={textFitPadding('批量运行')}
+                        colorPalette="blue"
+                        variant="ghost"
+                        borderWidth="1px"
+                        borderColor="currentColor"
+                        title="配置后端定时批量任务（BATCH_RUNNER）运行哪些账号"
+                        onClick={() => {
+                            void navigate({ to: `${DashBoardRoute.to || ''}${encodeURIComponent(BATCH_RUNNER)}` as any });
+                        }}
+                    >
+                        <FiLayers /> 批量运行
+                    </Button>
                 </HStack>
 
                 <Flex flex={1} minW={0} wrap="wrap" alignContent="flex-start" justify="flex-start" alignItems="center" gap={2}>
@@ -786,9 +801,9 @@ export function DashBoard() {
                                 <Table.ColumnHeader px={0} fontSize="md" py={4} fontWeight="bold" width="5%" textAlign="center">
                                     <Checkbox
                                         checked={
-                                            (selectedAccounts.length > 0 && selectedAccounts.length < (userInfo?.accounts?.length ?? 0))
+                                            (selectedAccounts.length > 0 && selectedAccounts.length < selectableNames.length)
                                                 ? "indeterminate"
-                                                : (selectedAccounts.length > 0 && selectedAccounts.length === userInfo?.accounts?.length)
+                                                : allSelected
                                         }
                                         onCheckedChange={toggleSelectAll}
                                         colorPalette="blue"

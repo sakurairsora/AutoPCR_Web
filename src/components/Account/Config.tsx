@@ -70,6 +70,9 @@ function useConfigSaveFlow(
     // 双用途：①effect 区分「本组件乐观回显」与「外部更新」（导入/同步），外部更新时 lastConfirmed 必须跟进；
     // ②commit 各段「是不是自己」的判定（成功清标记/失败回滚守卫/失败清标记）
     const inflightRef = useRef<{ payload: ConfigValue; token: object } | null>(null);
+    // 外部更新纪元：effect 每认定一次外部更新（导入/同步/bulk 直写）自增。commit 在途期间纪元未变时，
+    // 成功后即使父级已被后笔乐观值改走，lastConfirmed 也应推进到本笔 payload（服务器此刻确实是它）
+    const externalEpochRef = useRef(0);
     useEffect(() => {
         // 回显判定用值比较而非「是否有在途」：有在途但 propValue 不等于在途 payload = 外部更新（导入/同步），也要跟进；
         // 只跳过「恰好等于在途 payload」的乐观回显。无在途时必须显式判定（inflight !== null）：
@@ -77,6 +80,7 @@ function useConfigSaveFlow(
         if (inflightRef.current !== null && valueRef.current === inflightRef.current.payload) return; // 自己的乐观回显
         if (valueRef.current !== lastConfirmedRef.current) {
             lastConfirmedRef.current = valueRef.current;
+            externalEpochRef.current += 1;
         }
     }, [propValue]);
     const onUpdateRef = useRef(onConfigUpdate);
@@ -100,14 +104,16 @@ function useConfigSaveFlow(
         },
     ): Promise<boolean> => {
         const token = {}; // 每笔唯一身份：同值两笔（blur 型控件无 dirty 检查）也能区分
+        const epochAtStart = externalEpochRef.current;
         inflightRef.current = { payload, token };
         onUpdateRef.current?.(key, payload);
         try {
             const res = await enqueueConfigSave(alias, () => putAccountConfig(alias, key, payload));
-            // 推进守卫：仅当父级当前值仍等于本笔 payload 才推进 lastConfirmed——
-            // 在途期间 bulk 直写父级 V2（外部更新判定已跟进 lastConfirmed=V2）后本笔成功，
-            // 无条件推进会把它覆盖回 V1，此后 effect 不再触发，V1 永久 stale
-            if (valueRef.current === payload) {
+            // 推进守卫：父级当前值仍等于本笔 payload，或本笔在途期间无外部更新（纪元未变）。
+            // 后者兜住「不同值连笔」：前笔成功时父级已被后笔乐观值改走，但服务器此刻=前笔 payload，
+            // 不推进的话后笔失败会回滚到比服务器更旧的值（已弹过「保存成功」却显示旧值）；
+            // 外部更新情形仍不推进——bulk 在途直写父级 V2 后本笔成功，无条件推进会把它覆盖回 V1，此后 effect 不再触发，V1 永久 stale
+            if (valueRef.current === payload || externalEpochRef.current === epochAtStart) {
                 lastConfirmedRef.current = payload;
             }
             if (inflightRef.current?.token === token) inflightRef.current = null; // 后笔在途时保留标记
@@ -436,11 +442,12 @@ function ConfigMulti({ alias, value, info, onConfigUpdate }: ConfigProps) {
 
 
 function ConfigTime({ alias, value, info, onConfigUpdate }: ConfigProps) {
-    const [timeStr, setTimeStr] = useState(value as string);
+    // 与 ConfigText 同口径兜底：后端缺失该 time 配置时 value 为 undefined，直传 Input 会变非受控组件
+    const [timeStr, setTimeStr] = useState((value ?? '') as string);
     const { commit } = useConfigSaveFlow(alias, info.key, value, onConfigUpdate);
 
     useEffect(() => {
-        setTimeStr(value as string);
+        setTimeStr((value ?? '') as string);
     }, [value]);
 
     const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {

@@ -100,9 +100,14 @@ const ConfigImportExport = ({ alias, areas, onImportSuccess }: ConfigIOProps) =>
         if (file === undefined) {
             return;
         }
-        onOpen()
-        void file.text()
-            .then(realImport);
+        onOpen();
+        file.text()
+            .then(realImport)
+            .catch(() => {
+                // 读取失败必须复位 loading，否则导入相关按钮永久转圈
+                toaster.create({ type: 'error', title: '读取文件失败', description: '文件可能被占用或已无权限' });
+                onClose();
+            });
     }
 
     const importTextDialogDisclosure = useDisclosure();
