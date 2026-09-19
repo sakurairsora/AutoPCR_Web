@@ -203,7 +203,8 @@ function notifyTodaysStarts(entries: ScheduleEntry[], prefs: ScheduleNotifyPrefs
         const ts = Number((notified[k] as string).split('|')[1] ?? 0);
         if (ts < cutoff) delete notified[k];
     }
-    const fresh = targets.filter((e) => notified[e.key] !== 'notified');
+    // 记录值形如 "notified|<ts>"（老数据可能裸 "notified"），必须按前缀判，严格等值会把已通知的当新条目重复弹
+    const fresh = targets.filter((e) => !(notified[e.key] ?? '').startsWith('notified'));
     if (fresh.length === 0) return;
     fresh.forEach((e) => { notified[e.key] = `notified|${Date.now()}`; });
     saveNotified(notified);
