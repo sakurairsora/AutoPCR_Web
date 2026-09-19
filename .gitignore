@@ -31,3 +31,4 @@ audit/*
 !audit/backend-pr/
 
 .commit-msg.txt
+_tmp_autopcr_patchgen/
